@@ -6,6 +6,13 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Port 8080 is the contract. It is only a default: --urls, ASPNETCORE_URLS or ASPNETCORE_HTTP_PORTS take precedence,
+// e.g. to run a second instance on another port.
+if (string.IsNullOrEmpty(builder.Configuration["urls"]) && string.IsNullOrEmpty(builder.Configuration["http_ports"]))
+{
+    builder.WebHost.UseUrls("http://0.0.0.0:8080");
+}
+
 builder.Services.AddDbContext<AdmissionDbContext>(options =>
 {
     var connectionString = builder.Configuration.GetConnectionString("Default");

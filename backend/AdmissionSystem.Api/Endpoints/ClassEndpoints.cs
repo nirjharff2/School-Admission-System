@@ -34,6 +34,10 @@ public static class ClassEndpoints
             throw ApiException.BadRequest(ErrorCodes.ValidationFailed,
                 $"Class name must be at most {Limits.ClassNameMaxLength} characters.");
         }
+        if (name.Any(char.IsControl))
+        {
+            throw ApiException.BadRequest(ErrorCodes.ValidationFailed, "Class name must not contain control characters.");
+        }
         if (request!.TotalSeats is not >= 1)
         {
             throw ApiException.BadRequest(ErrorCodes.ValidationFailed, "Total seats must be a whole number of at least 1.");

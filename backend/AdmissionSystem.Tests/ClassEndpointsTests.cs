@@ -38,6 +38,8 @@ public class ClassEndpointsTests(ApiFixture api)
     [Theory]
     [InlineData("""{"name":"","totalSeats":10}""")]
     [InlineData("""{"name":"   ","totalSeats":10}""")]
+    [InlineData("""{"name":"a\u0000b","totalSeats":10}""")]
+    [InlineData("""{"name":"Class\n1","totalSeats":10}""")]
     [InlineData("""{"totalSeats":10}""")]
     [InlineData("""{"name":null,"totalSeats":10}""")]
     [InlineData("""{"name":"Class 1","totalSeats":0}""")]
