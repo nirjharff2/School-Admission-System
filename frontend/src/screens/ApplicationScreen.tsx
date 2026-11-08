@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { api, toFailure, type Hold, type HoldStatus } from '../api/client'
+import ErrorBanner from '../components/ErrorBanner'
+import RefreshWarning from '../components/RefreshWarning'
 import StatusBadge from '../components/StatusBadge'
 import { formatDateTime } from '../format'
 import { formatRemaining, useCountdown } from '../hooks/useCountdown'
@@ -48,31 +50,24 @@ interface Detail {
   className: string | null
 }
 
-async function loadDetail(holdId: string): Promise<Detail> {
-  const hold = await api.getHold(holdId)
-  let className: string | null = null
-  try {
-    className = (await api.getClass(hold.classId)).name
-  } catch {
-    // the status is what matters on this screen; without the name the class id is shown
-  }
-  return { hold, className }
-}
-
-type Notice = { kind: 'success' | 'error'; text: string }
+type Notice = { kind: 'success'; text: string } | { kind: 'error'; title: string; text: string }
 
 /** One application: status, live countdown, class, and the Pay / Cancel actions (enabled only while the hold is HELD). */
 export default function ApplicationScreen({ holdId }: { holdId: string }) {
   const { studentId, valid } = useStudentId()
-  const { loaded, reload, mutate } = useLoad(holdId, () => loadDetail(holdId), {
+  const { loaded, reload, mutate } = useLoad(holdId, () => api.getHold(holdId), {
     // a confirmed, expired or cancelled application can no longer change, so only a HELD one is refetched on a timer
-    refreshDelay: (detail, now) => (detail ? refreshDelayFor([detail.hold], now, SLOW_REFRESH_MS, null) : SLOW_REFRESH_MS),
+    refreshDelay: (hold, now) => (hold ? refreshDelayFor([hold], now, SLOW_REFRESH_MS, null) : SLOW_REFRESH_MS),
   })
+  // the class name never changes: fetched once per class, outside the polled status request; the class id is shown if it fails
+  const classId = loaded.state === 'ready' ? loaded.value.classId : null
+  const classLoad = useLoad(classId === null ? null : `class:${classId}`, () => api.getClass(classId ?? ''))
+  const className = classLoad.loaded.state === 'ready' ? classLoad.loaded.value.name : null
   const [busy, setBusy] = useState<'pay' | 'cancel' | null>(null)
   const [askingToCancel, setAskingToCancel] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
 
-  async function act(kind: 'pay' | 'cancel', detail: Detail) {
+  async function act(kind: 'pay' | 'cancel', hold: Hold) {
     if (busy) return
     setBusy(kind)
     setNotice(null)
@@ -80,15 +75,19 @@ export default function ApplicationScreen({ holdId }: { holdId: string }) {
     try {
       if (kind === 'pay') {
         const result = await api.confirm(holdId, studentId)
-        mutate({ ...detail, hold: { ...detail.hold, status: result.status } })
+        mutate({ ...hold, status: result.status })
         setNotice({ kind: 'success', text: 'Payment received. Your admission is confirmed.' })
       } else {
         await api.cancel(holdId, studentId)
-        mutate({ ...detail, hold: { ...detail.hold, status: 'CANCELLED' } })
+        mutate({ ...hold, status: 'CANCELLED' })
         setNotice({ kind: 'success', text: 'Application cancelled. The seat has been released.' })
       }
     } catch (error) {
-      setNotice({ kind: 'error', text: toFailure(error).message })
+      setNotice({
+        kind: 'error',
+        title: kind === 'pay' ? 'The fee was not paid.' : 'The application was not cancelled.',
+        text: toFailure(error).message,
+      })
       reload() // the status shown may be out of date (for example the hold just expired)
     } finally {
       setBusy(null)
@@ -101,19 +100,15 @@ export default function ApplicationScreen({ holdId }: { holdId: string }) {
 
       {loaded.state === 'loading' && <p className="hint">Loading application…</p>}
       {loaded.state === 'error' && (
-        <div role="alert">
-          <p className="error">This application could not be loaded. {loaded.message}</p>
-          <button type="button" onClick={reload}>
-            Try again
-          </button>{' '}
+        <ErrorBanner title="This application could not be loaded." message={loaded.message} onRetry={reload}>
           <a href={paths.applicationLookup}>Open another application</a>
-        </div>
+        </ErrorBanner>
       )}
 
       {loaded.state === 'ready' && (
         <>
           <ApplicationDetails
-            detail={loaded.value}
+            detail={{ hold: loaded.value, className }}
             requestedAt={loaded.requestedAt}
             valid={valid}
             busy={busy}
@@ -123,17 +118,15 @@ export default function ApplicationScreen({ holdId }: { holdId: string }) {
             onKeep={() => setAskingToCancel(false)}
             onCancel={() => void act('cancel', loaded.value)}
           />
-          {loaded.refreshError && (
-            <p className="hint">
-              The latest status could not be fetched ({loaded.refreshError}). Showing the last known status; trying again
-              automatically.
-            </p>
-          )}
+          {loaded.refreshError && <RefreshWarning what="The status" reason={loaded.refreshError} />}
         </>
       )}
 
-      {notice && (
-        <p className={notice.kind === 'error' ? 'error' : 'success'} role={notice.kind === 'error' ? 'alert' : 'status'}>
+      {notice?.kind === 'error' && (
+        <ErrorBanner title={notice.title} message={notice.text} onDismiss={() => setNotice(null)} />
+      )}
+      {notice?.kind === 'success' && (
+        <p className="success" role="status">
           {notice.text}
         </p>
       )}

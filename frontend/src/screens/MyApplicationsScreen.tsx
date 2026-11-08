@@ -1,4 +1,6 @@
 import { api, type MyHold } from '../api/client'
+import ErrorBanner from '../components/ErrorBanner'
+import RefreshWarning from '../components/RefreshWarning'
 import StatusBadge from '../components/StatusBadge'
 import StudentGate from '../components/StudentGate'
 import { formatDateTime } from '../format'
@@ -25,12 +27,7 @@ export default function MyApplicationsScreen() {
       <StudentGate>
         {loaded.state === 'loading' && <p className="hint">Loading your applications…</p>}
         {loaded.state === 'error' && (
-          <div role="alert">
-            <p className="error">Your applications could not be loaded. {loaded.message}</p>
-            <button type="button" onClick={reload}>
-              Try again
-            </button>
-          </div>
+          <ErrorBanner title="Your applications could not be loaded." message={loaded.message} onRetry={reload} />
         )}
         {loaded.state === 'ready' && loaded.value.length === 0 && (
           <p>
@@ -41,9 +38,7 @@ export default function MyApplicationsScreen() {
           <ApplicationsTable holds={loaded.value} requestedAt={loaded.requestedAt} />
         )}
         {loaded.state === 'ready' && loaded.refreshError && (
-          <p className="hint">
-            The list could not be refreshed ({loaded.refreshError}). Showing the last known list; trying again automatically.
-          </p>
+          <RefreshWarning what="The list" reason={loaded.refreshError} />
         )}
       </StudentGate>
     </section>

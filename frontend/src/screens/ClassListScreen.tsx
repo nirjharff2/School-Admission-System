@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { api, toFailure } from '../api/client'
+import ErrorBanner from '../components/ErrorBanner'
+import RefreshWarning from '../components/RefreshWarning'
 import { useLoad } from '../hooks/useLoad'
 import { paths } from '../route'
 import { useStudentId } from '../studentId'
@@ -34,25 +36,15 @@ export default function ClassListScreen() {
       <h1>Classes</h1>
       {!valid && <p className="hint">Enter a valid 17-digit student ID at the top of the page to apply for a seat.</p>}
       {applyFailure?.studentId === studentId && (
-        <p className="error" role="alert">
-          {applyFailure.message}
-        </p>
+        <ErrorBanner title="Your application was not made." message={applyFailure.message} />
       )}
 
       {loaded.state === 'loading' && <p className="hint">Loading classes…</p>}
       {loaded.state === 'error' && (
-        <div role="alert">
-          <p className="error">The class list could not be loaded. {loaded.message}</p>
-          <button type="button" onClick={reload}>
-            Try again
-          </button>
-        </div>
+        <ErrorBanner title="The class list could not be loaded." message={loaded.message} onRetry={reload} />
       )}
       {loaded.state === 'ready' && loaded.refreshError && (
-        <p className="hint">
-          The seat numbers could not be refreshed ({loaded.refreshError}). They may be out of date; trying again
-          automatically.
-        </p>
+        <RefreshWarning what="The seat numbers" reason={loaded.refreshError} />
       )}
       {loaded.state === 'ready' && loaded.value.length === 0 && (
         <p>

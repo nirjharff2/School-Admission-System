@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { api, toFailure, type CreatedClass } from '../api/client'
 import { CLASS_NAME_MAX_LENGTH, validateClassForm, type ClassFormErrors } from '../classForm'
+import ErrorBanner from '../components/ErrorBanner'
 import { paths } from '../route'
 
 /** School admin: create a class (one shift) with a name and a seat count. */
@@ -46,6 +47,7 @@ export default function CreateClassScreen() {
             type="text"
             autoComplete="off"
             value={name}
+            // typing past 200 is allowed so the "at most 200 characters" message can say so, instead of silently cutting the text
             maxLength={CLASS_NAME_MAX_LENGTH + 50}
             onChange={(e) => setName(e.target.value)}
             aria-invalid={errors.name !== undefined}
@@ -82,11 +84,7 @@ export default function CreateClassScreen() {
         </button>
       </form>
 
-      {failure && (
-        <p className="error" role="alert">
-          The class was not created. {failure}
-        </p>
-      )}
+      {failure && <ErrorBanner title="The class was not created." message={failure} />}
       {created && (
         <p className="success" role="status">
           Class “{created.name}” created with {created.totalSeats} seat{created.totalSeats === 1 ? '' : 's'}.{' '}
