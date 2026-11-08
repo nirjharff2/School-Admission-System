@@ -23,7 +23,7 @@ public class OverloadAndMigrationTests(ApiFixture api)
     [Fact]
     public async Task A_burst_of_thousands_of_applications_gets_only_201_or_409_and_sells_each_seat_once()
     {
-        const int seats = 400;
+        const int seats = 300;
         const int requests = 3000;
         var classId = await CreateClassAsync(_client, seats);
 
@@ -143,6 +143,133 @@ public class OverloadAndMigrationTests(ApiFixture api)
         }
     }
 
+    [Fact]
+    public async Task A_full_class_or_a_repeat_applicant_is_refused_at_once_even_while_the_class_lock_is_held()
+    {
+        var classId = await CreateClassAsync(_client, 1);
+        var student = NewStudentId();
+        await ApplyAsync(_client, classId, student);
+
+        await using var heldLock = await HoldClassLockAsync(classId);
+
+        // Neither needs the lock: both must be answered while another transaction sits on it.
+        using var patience = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var full = await _client.SendAsync(Request(HttpMethod.Post, $"/classes/{classId}/holds", NewStudentId()), patience.Token);
+        var repeat = await _client.SendAsync(Request(HttpMethod.Post, $"/classes/{classId}/holds", student), patience.Token);
+        var unknown = await _client.SendAsync(Request(HttpMethod.Post, "/classes/c_doesnotexist/holds", student), patience.Token);
+
+        Assert.Equal(HttpStatusCode.Conflict, full.StatusCode);
+        Assert.Equal("no_seats_available", (await ReadJsonAsync(full)).GetProperty("error").GetString());
+        Assert.Equal(HttpStatusCode.Conflict, repeat.StatusCode);
+        Assert.Equal("already_applied", (await ReadJsonAsync(repeat)).GetProperty("error").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+    }
+
+    [Fact]
+    public async Task Granting_a_seat_waits_for_the_database_class_lock_but_confirming_does_not()
+    {
+        var classId = await CreateClassAsync(_client, 5);
+        var owner = NewStudentId();
+        var holdId = await ApplyAsync(_client, classId, owner);
+
+        Task<HttpResponseMessage> apply;
+        await using (var heldLock = await HoldClassLockAsync(classId))
+        {
+            apply = _client.SendAsync(Request(HttpMethod.Post, $"/classes/{classId}/holds", NewStudentId()));
+
+            using var patience = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var confirm = await _client.SendAsync(Request(HttpMethod.Post, $"/holds/{holdId}/confirm", owner), patience.Token);
+            Assert.Equal(HttpStatusCode.OK, confirm.StatusCode); // answered while the class row is locked by someone else
+
+            await Task.Delay(700);
+            Assert.False(apply.IsCompleted, "applying must wait while the class row is locked by another transaction");
+        } // the lock is released here
+
+        Assert.Equal(HttpStatusCode.Created, (await apply.WaitAsync(TimeSpan.FromSeconds(10))).StatusCode);
+    }
+
+    [Fact]
+    public async Task An_application_waits_for_a_confirm_that_is_changing_a_lapsed_hold_and_then_counts_it()
+    {
+        // The race: a hold passes its expiry just as its owner's confirm runs. Applying must not count the hold as lapsed
+        // (and give its seat away) if that confirm wins the row; it marks lapsed rows EXPIRED with an UPDATE, which has to
+        // wait for the confirm's row lock and then see CONFIRMED. Simulated with a transaction that holds the hold's row.
+        var classId = await CreateClassAsync(_client, 1);
+        var lapsed = NewHold(classId, NewStudentId(), HoldStatus.HELD, DateTime.UtcNow.AddMinutes(-1));
+        await api.WithDbAsync(async db =>
+        {
+            db.Holds.Add(lapsed);
+            await db.SaveChangesAsync();
+        });
+
+        await using var connection = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(api.ConnectionString) { Pooling = false }.ConnectionString);
+        await connection.OpenAsync();
+        await using var confirmInFlight = await connection.BeginTransactionAsync();
+        await using (var lockRow = new NpgsqlCommand("SELECT 1 FROM holds WHERE id = @id FOR UPDATE", connection, confirmInFlight))
+        {
+            lockRow.Parameters.AddWithValue("id", lapsed.Id);
+            await lockRow.ExecuteScalarAsync();
+        }
+
+        // The only seat looks free (the lapsed hold does not count), so the application passes the plain read and then
+        // has to wait for the row lock when it tries to store the lapsed hold as EXPIRED.
+        var apply = SendAsync(_client, HttpMethod.Post, $"/classes/{classId}/holds", NewStudentId());
+        await Task.Delay(700);
+        Assert.False(apply.IsCompleted, "applying must wait for the transaction that holds the lapsed hold's row");
+
+        await using (var confirm = new NpgsqlCommand("UPDATE holds SET status = 'CONFIRMED' WHERE id = @id", connection, confirmInFlight))
+        {
+            confirm.Parameters.AddWithValue("id", lapsed.Id);
+            await confirm.ExecuteNonQueryAsync();
+        }
+        await confirmInFlight.CommitAsync();
+
+        var response = await apply.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode); // the class is full: the confirmed hold counts
+        Assert.Equal("no_seats_available", (await ReadJsonAsync(response)).GetProperty("error").GetString());
+        AssertSeatCounts(await GetClassAsync(_client, classId), null, total: 1, held: 0, confirmed: 1, available: 0);
+    }
+
+    [Fact]
+    public async Task A_confirm_sent_during_a_big_burst_of_applications_is_answered_in_seconds_not_after_the_whole_queue()
+    {
+        const int seats = 500;
+        var classId = await CreateClassAsync(_client, seats);
+        var payer = NewStudentId();
+        var holdId = await ApplyAsync(_client, classId, payer);
+
+        var burst = Enumerable.Range(0, seats - 1).Select(_ => Task.Run(async () =>
+            (await SendAsync(_client, HttpMethod.Post, $"/classes/{classId}/holds", NewStudentId())).StatusCode)).ToList();
+        await Task.Delay(500); // let the queue build
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var confirm = await SendAsync(_client, HttpMethod.Post, $"/holds/{holdId}/confirm", payer);
+        watch.Stop();
+
+        Assert.Equal(HttpStatusCode.OK, confirm.StatusCode);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(6),
+            $"confirm took {watch.Elapsed.TotalSeconds:0.0}s behind {seats - 1} queued applications");
+
+        var statuses = await Task.WhenAll(burst);
+        Assert.All(statuses, s => Assert.Equal(HttpStatusCode.Created, s));
+        AssertSeatCounts(await GetClassAsync(_client, classId), null, total: seats, held: seats - 1, confirmed: 1, available: 0);
+    }
+
+    [Fact]
+    public async Task Starting_against_a_server_where_the_database_does_not_exist_yet_creates_it()
+    {
+        var databaseName = $"fresh_{Guid.NewGuid():N}"; // deliberately not created
+        var connection = new NpgsqlConnectionStringBuilder(api.ConnectionString) { Database = databaseName }.ConnectionString;
+        using var host = api.WithWebHostBuilder(b => b.UseSetting("ConnectionStrings:Default", connection));
+
+        _ = host.Server; // runs Program, including the startup migration
+
+        await using var read = new NpgsqlConnection(connection);
+        await read.OpenAsync();
+        await using var cmd = new NpgsqlCommand("SELECT to_regclass('public.holds') IS NOT NULL", read);
+        Assert.True((bool)(await cmd.ExecuteScalarAsync())!);
+    }
+
     // ---- migration ------------------------------------------------------------------------------------------
 
     [Fact]
@@ -211,5 +338,35 @@ public class OverloadAndMigrationTests(ApiFixture api)
             await create.ExecuteNonQueryAsync();
         }
         return new NpgsqlConnectionStringBuilder(api.ConnectionString) { Database = databaseName, Pooling = pooling }.ConnectionString;
+    }
+
+    private static HttpRequestMessage Request(HttpMethod method, string path, string studentId)
+    {
+        var request = new HttpRequestMessage(method, path);
+        request.Headers.TryAddWithoutValidation("X-Student-Id", studentId);
+        return request;
+    }
+
+    /// <summary>Holds the class row lock in a separate transaction until the returned object is disposed (as another backend process would).</summary>
+    private async Task<IAsyncDisposable> HoldClassLockAsync(string classId)
+    {
+        var connection = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(api.ConnectionString) { Pooling = false }.ConnectionString);
+        await connection.OpenAsync();
+        var transaction = await connection.BeginTransactionAsync();
+        await using (var cmd = new NpgsqlCommand("SELECT 1 FROM classes WHERE id = @id FOR UPDATE", connection, transaction))
+        {
+            cmd.Parameters.AddWithValue("id", classId);
+            await cmd.ExecuteScalarAsync();
+        }
+        return new LockHolder(connection, transaction);
+    }
+
+    private sealed class LockHolder(NpgsqlConnection connection, NpgsqlTransaction transaction) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            await transaction.RollbackAsync();
+            await connection.DisposeAsync();
+        }
     }
 }

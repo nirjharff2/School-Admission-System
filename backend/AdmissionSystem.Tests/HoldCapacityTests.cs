@@ -101,19 +101,24 @@ public class HoldCapacityTests(ApiFixture api)
     }
 
     [Fact]
-    public async Task A_refused_application_changes_nothing_in_the_database()
+    public async Task An_application_stores_every_lapsed_hold_of_the_class_as_expired_and_a_refused_one_adds_no_row()
     {
         var student = NewStudentId();
         var classId = await CreateClassAsync(_client, 1);
         var lapsedOfOther = NewHold(classId, NewStudentId(), HoldStatus.HELD, DateTime.UtcNow.AddSeconds(-1));
         await SeedAsync(lapsedOfOther);
+
         await ApplyAsync(_client, classId, student);
+
+        // Applying took the lapsed hold's row lock and stored it as EXPIRED, whoever it belonged to (that is what
+        // serializes it with a confirm racing the expiry); the seat it occupied on paper was free anyway.
+        Assert.Equal(HoldStatus.EXPIRED, await StoredStatus(lapsedOfOther.Id));
 
         var refused = await SendAsync(_client, HttpMethod.Post, $"/classes/{classId}/holds", NewStudentId());
 
         Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
-        Assert.Equal(2, await CountHolds(classId, HoldStatus.HELD)); // the student's real hold + the other student's lapsed one, no new row
-        Assert.Equal(HoldStatus.HELD, await StoredStatus(lapsedOfOther.Id)); // another student's row is not ours to touch
+        Assert.Equal(1, await CountHolds(classId, HoldStatus.HELD));    // the student's real hold, no new row
+        Assert.Equal(1, await CountHolds(classId, HoldStatus.EXPIRED)); // the lapsed one
     }
 
     [Fact]
