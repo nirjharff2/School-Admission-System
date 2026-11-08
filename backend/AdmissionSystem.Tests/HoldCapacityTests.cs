@@ -13,7 +13,7 @@ namespace AdmissionSystem.Tests;
 /// <summary>
 /// What the database guarantees about holds: the one-active-hold unique index, the in-transaction expiry of a student's own
 /// lapsed hold, and (as a sanity check on the class-row lock) a burst of simultaneous applications.
-/// The thorough concurrency suite, including two backend processes, is a separate piece of work.
+/// The formal concurrency suite (200 requests for 10 seats, parallel confirms, two backend instances) is in <see cref="ConcurrencyTests"/>.
 /// </summary>
 [Collection(ApiCollection.Name)]
 public class HoldCapacityTests(ApiFixture api)
