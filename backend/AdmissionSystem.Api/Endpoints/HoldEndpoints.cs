@@ -11,6 +11,8 @@ public sealed record HoldResponse(string HoldId, string ClassId, HoldStatus Stat
 
 public sealed record MyHoldResponse(string HoldId, string ClassId, string ClassName, HoldStatus Status, DateTime ExpiresAt);
 
+public sealed record ConfirmResponse(string HoldId, HoldStatus Status);
+
 public static class HoldEndpoints
 {
     public static void MapHoldEndpoints(this IEndpointRouteBuilder app)
@@ -18,6 +20,8 @@ public static class HoldEndpoints
         app.MapPost("/classes/{classId}/holds", CreateHold);
         app.MapGet("/holds/{holdId}", GetHold);
         app.MapGet("/me/holds", ListMyHolds);
+        app.MapPost("/holds/{holdId}/confirm", ConfirmHold);
+        app.MapDelete("/holds/{holdId}", CancelHold);
     }
 
     private static async Task<IResult> CreateHold(
@@ -90,4 +94,77 @@ public static class HoldEndpoints
         return Results.Ok(holds.Select(r =>
             new MyHoldResponse(r.Hold.Id, r.Hold.ClassId, r.ClassName, r.Hold.EffectiveStatus(now), r.Hold.ExpiresAt)));
     }
+
+    // Confirm and cancel are each ONE conditional UPDATE. The row only changes while it is still HELD, unexpired and
+    // owned by the caller, so concurrent or repeated calls cannot move it twice and the seat counts cannot drift.
+    // Only when the UPDATE touches no row do we read the hold, to answer with the right status.
+
+    private static async Task<IResult> ConfirmHold(
+        string holdId, HttpRequest request, AdmissionDbContext db, TimeProvider clock, CancellationToken ct)
+    {
+        var studentId = StudentIdHeader.Require(request);
+        var now = clock.GetUtcNow().UtcDateTime;
+
+        var updated = await db.Holds
+            .Where(h => h.Id == holdId && h.StudentId == studentId && h.Status == HoldStatus.HELD && h.ExpiresAt > now)
+            .ExecuteUpdateAsync(s => s.SetProperty(h => h.Status, HoldStatus.CONFIRMED), ct);
+        if (updated == 1)
+        {
+            return Results.Ok(new ConfirmResponse(holdId, HoldStatus.CONFIRMED));
+        }
+
+        var hold = await LoadOwnedHold(db, holdId, studentId, ct);
+        return hold.EffectiveStatus(now) switch
+        {
+            HoldStatus.CONFIRMED => Results.Ok(new ConfirmResponse(holdId, HoldStatus.CONFIRMED)), // repeat confirm: idempotent
+            HoldStatus.EXPIRED => throw ApiException.Conflict(ErrorCodes.HoldExpired,
+                "This application has expired, so the fee can no longer be paid. Please apply again."),
+            HoldStatus.CANCELLED => throw ApiException.Conflict(ErrorCodes.HoldCancelled,
+                "This application was cancelled, so the fee cannot be paid. Please apply again."),
+            _ => throw StateChanged(),
+        };
+    }
+
+    private static async Task<IResult> CancelHold(
+        string holdId, HttpRequest request, AdmissionDbContext db, TimeProvider clock, CancellationToken ct)
+    {
+        var studentId = StudentIdHeader.Require(request);
+        var now = clock.GetUtcNow().UtcDateTime;
+
+        var updated = await db.Holds
+            .Where(h => h.Id == holdId && h.StudentId == studentId && h.Status == HoldStatus.HELD && h.ExpiresAt > now)
+            .ExecuteUpdateAsync(s => s.SetProperty(h => h.Status, HoldStatus.CANCELLED), ct);
+        if (updated == 1)
+        {
+            return Results.NoContent();
+        }
+
+        var hold = await LoadOwnedHold(db, holdId, studentId, ct);
+        return hold.EffectiveStatus(now) switch
+        {
+            HoldStatus.CANCELLED => Results.NoContent(), // repeat cancel: already in the requested end state
+            HoldStatus.CONFIRMED => throw ApiException.Conflict(ErrorCodes.HoldConfirmed,
+                "The admission fee is already paid, so this application can no longer be cancelled."),
+            HoldStatus.EXPIRED => throw ApiException.Conflict(ErrorCodes.HoldExpired,
+                "This application has already expired, so there is nothing to cancel."),
+            _ => throw StateChanged(),
+        };
+    }
+
+    /// <summary>The hold, or 404 if it does not exist and 403 if it belongs to another student.</summary>
+    private static async Task<Hold> LoadOwnedHold(AdmissionDbContext db, string holdId, string studentId, CancellationToken ct)
+    {
+        var hold = await db.Holds.AsNoTracking().FirstOrDefaultAsync(h => h.Id == holdId, ct)
+            ?? throw ApiException.NotFound(ErrorCodes.HoldNotFound, "This application does not exist.");
+        if (hold.StudentId != studentId)
+        {
+            throw ApiException.Forbidden(ErrorCodes.NotYourHold, "This application belongs to another student.");
+        }
+        return hold;
+    }
+
+    // Reached only if the hold changed between our UPDATE and the follow-up read in a way the UPDATE should have caught.
+    private static ApiException StateChanged() =>
+        ApiException.Conflict(ErrorCodes.HoldStateChanged, "This application changed while we were processing your request. Please try again.");
 }
+

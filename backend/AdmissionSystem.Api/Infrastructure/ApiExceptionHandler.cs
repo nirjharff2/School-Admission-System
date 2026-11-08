@@ -38,6 +38,11 @@ public static class ErrorCodes
     public const string InvalidStudentId = "invalid_student_id";
     public const string AlreadyApplied = "already_applied";
     public const string NoSeatsAvailable = "no_seats_available";
+    public const string NotYourHold = "not_your_hold";
+    public const string HoldExpired = "hold_expired";
+    public const string HoldCancelled = "hold_cancelled";
+    public const string HoldConfirmed = "hold_confirmed";
+    public const string HoldStateChanged = "hold_state_changed";
     public const string NotFound = "not_found";
     public const string MethodNotAllowed = "method_not_allowed";
     public const string InternalError = "internal_error";
