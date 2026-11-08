@@ -10,6 +10,7 @@
 - Database schema (EF Core entities, migration), class endpoints, uniform error handling, and the Postgres-backed integration tests (Testcontainers).
 - Seat holds: student-id validation, `HOLD_DURATION_SECONDS` handling, `POST /classes/{id}/holds`, `GET /holds/{id}`, `GET /me/holds` and their tests.
 - Confirm and cancel: `POST /holds/{id}/confirm`, `DELETE /holds/{id}` (single conditional UPDATE each), the cancel-after-confirm policy and their tests, including a 20-way parallel confirm.
+- Expiry sweeper: the `BackgroundService`, its interval setting and tests (real 1-second holds and sweeper on a separate database, two instances on one database); the sweeper tests were also checked by temporarily disabling the service and confirming they fail.
 
 ## Where the AI was wrong, and how it was caught
 
