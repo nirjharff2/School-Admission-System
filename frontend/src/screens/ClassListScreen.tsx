@@ -36,7 +36,11 @@ export default function ClassListScreen() {
       <h1>Classes</h1>
       {!valid && <p className="hint">Enter a valid 17-digit student ID at the top of the page to apply for a seat.</p>}
       {applyFailure?.studentId === studentId && (
-        <ErrorBanner title="Your application was not made." message={applyFailure.message} />
+        <ErrorBanner
+          title="Your application was not made."
+          message={applyFailure.message}
+          onDismiss={() => setApplyFailure(null)}
+        />
       )}
 
       {loaded.state === 'loading' && <p className="hint">Loading classes…</p>}

@@ -61,7 +61,10 @@ export default function ApplicationScreen({ holdId }: { holdId: string }) {
   })
   // the class name never changes: fetched once per class, outside the polled status request; the class id is shown if it fails
   const classId = loaded.state === 'ready' ? loaded.value.classId : null
-  const classLoad = useLoad(classId === null ? null : `class:${classId}`, () => api.getClass(classId ?? ''))
+  const classLoad = useLoad(classId === null ? null : `class:${classId}`, () => api.getClass(classId ?? ''), {
+    // the name never changes, so there is nothing to refresh once it is known; until then a failure is retried
+    refreshDelay: (klass) => (klass === undefined ? SLOW_REFRESH_MS : null),
+  })
   const className = classLoad.loaded.state === 'ready' ? classLoad.loaded.value.name : null
   const [busy, setBusy] = useState<'pay' | 'cancel' | null>(null)
   const [askingToCancel, setAskingToCancel] = useState(false)
@@ -119,6 +122,11 @@ export default function ApplicationScreen({ holdId }: { holdId: string }) {
             onCancel={() => void act('cancel', loaded.value)}
           />
           {loaded.refreshError && <RefreshWarning what="The status" reason={loaded.refreshError} />}
+          {classLoad.loaded.state === 'error' && (
+            <p className="warning" role="status">
+              The class name could not be loaded ({classLoad.loaded.message}), so the class ID is shown instead.
+            </p>
+          )}
         </>
       )}
 

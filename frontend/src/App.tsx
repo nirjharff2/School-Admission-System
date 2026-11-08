@@ -40,7 +40,7 @@ export default function App() {
         <StudentIdBar />
         <Nav route={route} />
       </header>
-      <UnhandledErrors />
+      <UnhandledErrors key={JSON.stringify(route)} />
       <main>
         {/* a failing screen keeps the ID box and navigation usable; moving to another screen retries */}
         <ErrorBoundary resetKey={JSON.stringify(route)}>

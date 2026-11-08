@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import ErrorBanner from './ErrorBanner'
 
 interface Props {
   children: ReactNode
@@ -30,18 +31,16 @@ export default class ErrorBoundary extends Component<Props, State> {
   render() {
     if (!this.state.failed) return this.props.children
     return (
-      <div className="boundary" role="alert">
-        <h1>Something went wrong</h1>
-        <p>
-          The page hit an unexpected problem. Your applications are safe on the server. Please try again, or reload the
-          page.
-        </p>
-        <button type="button" onClick={() => this.setState({ failed: false })}>
-          Try again
-        </button>{' '}
-        <button type="button" onClick={() => window.location.reload()}>
-          Reload page
-        </button>
+      <div className="boundary">
+        <ErrorBanner
+          title="Something went wrong."
+          message="The page hit an unexpected problem. Your applications are safe on the server. Please try again, or reload the page."
+          onRetry={() => this.setState({ failed: false })}
+        >
+          <button type="button" onClick={() => window.location.reload()}>
+            Reload page
+          </button>
+        </ErrorBanner>
       </div>
     )
   }

@@ -84,7 +84,9 @@ export default function CreateClassScreen() {
         </button>
       </form>
 
-      {failure && <ErrorBanner title="The class was not created." message={failure} />}
+      {failure && (
+        <ErrorBanner title="The class was not created." message={failure} onDismiss={() => setFailure(null)} />
+      )}
       {created && (
         <p className="success" role="status">
           Class “{created.name}” created with {created.totalSeats} seat{created.totalSeats === 1 ? '' : 's'}.{' '}
