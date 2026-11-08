@@ -1,6 +1,7 @@
 import ErrorBoundary from './components/ErrorBoundary'
 import Nav from './components/Nav'
 import StudentIdBar from './components/StudentIdBar'
+import UnhandledErrors from './components/UnhandledErrors'
 import { useRoute, paths, type Route } from './route'
 import ApplicationScreen, { ApplicationLookup } from './screens/ApplicationScreen'
 import ClassListScreen from './screens/ClassListScreen'
@@ -39,6 +40,7 @@ export default function App() {
         <StudentIdBar />
         <Nav route={route} />
       </header>
+      <UnhandledErrors />
       <main>
         {/* a failing screen keeps the ID box and navigation usable; moving to another screen retries */}
         <ErrorBoundary resetKey={JSON.stringify(route)}>
