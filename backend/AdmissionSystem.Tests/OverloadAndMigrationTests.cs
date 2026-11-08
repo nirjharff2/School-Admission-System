@@ -79,7 +79,7 @@ public class OverloadAndMigrationTests(ApiFixture api)
     }
 
     [Fact]
-    public void Only_timeouts_and_server_capacity_errors_count_as_overload()
+    public void Timeouts_server_capacity_errors_and_deadlock_victims_count_as_overload_but_other_failures_do_not()
     {
         PostgresException Pg(string sqlState) => new("x", "ERROR", "ERROR", sqlState);
 
@@ -88,6 +88,7 @@ public class OverloadAndMigrationTests(ApiFixture api)
         Assert.True(PostgresErrors.IsOverload(new DbUpdateException("save", Pg(PostgresErrorCodes.LockNotAvailable))));
         Assert.True(PostgresErrors.IsOverload(Pg(PostgresErrorCodes.TooManyConnections)));
         Assert.True(PostgresErrors.IsOverload(Pg(PostgresErrorCodes.QueryCanceled)));
+        Assert.True(PostgresErrors.IsOverload(new DbUpdateException("save", Pg(PostgresErrorCodes.DeadlockDetected))));
         Assert.False(PostgresErrors.IsOverload(new DbUpdateException("save", Pg(PostgresErrorCodes.UniqueViolation))));
         Assert.False(PostgresErrors.IsOverload(new InvalidOperationException("boom")));
     }
