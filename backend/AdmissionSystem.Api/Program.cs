@@ -27,6 +27,8 @@ builder.Services.AddDbContext<AdmissionDbContext>(options =>
 builder.Services.AddSingleton(TimeProvider.System);
 // Resolved lazily from IConfiguration (env var HOLD_DURATION_SECONDS) and validated at startup below.
 builder.Services.AddSingleton(sp => HoldSettings.From(sp.GetRequiredService<IConfiguration>()));
+builder.Services.AddSingleton(sp => SweeperSettings.From(sp.GetRequiredService<IConfiguration>()));
+builder.Services.AddHostedService<ExpirySweeper>();
 
 // JSON: camelCase (web default), enums as strings (HELD, CONFIRMED, ...), timestamps as ISO-8601 UTC with a trailing Z.
 builder.Services.ConfigureHttpJsonOptions(o =>
@@ -45,6 +47,7 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAn
 var app = builder.Build();
 
 _ = app.Services.GetRequiredService<HoldSettings>(); // fail fast on an invalid HOLD_DURATION_SECONDS
+_ = app.Services.GetRequiredService<SweeperSettings>(); // ... and on an invalid EXPIRY_SWEEP_INTERVAL_SECONDS
 
 using (var scope = app.Services.CreateScope())
 {
