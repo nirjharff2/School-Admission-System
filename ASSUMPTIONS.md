@@ -1,6 +1,37 @@
 # Assumptions
 
-Decisions the specification left open, each with its reasoning.
+Decisions the specification left open, each with its reasoning. The sections below hold the detail and the evidence; this first part is the short version.
+
+"A reviewer" in the text below means the separate AI review pass described in [AI_USAGE.md](AI_USAGE.md): after each feature another AI agent tried to break it (load bursts, two processes, races) and its findings are quoted where they changed a decision.
+
+## Decisions at a glance
+
+| Topic | Decision |
+|---|---|
+| **IDs** | `c_` / `h_` + 16 random lower-case hex characters, generated in the application (opaque, non-sequential). |
+| **Student identity** | `X-Student-Id` must be exactly 17 ASCII digits; checked before anything else (a bad header is a `400` even for an unknown class). The UI saves it in `localStorage` and flags anything else. |
+| **Expiry** | `expiresAt = createdAt + HOLD_DURATION_SECONDS` (default 600). A `HELD` hold past `expiresAt` is reported `EXPIRED` by every read and is not counted as a seat, whether or not the background sweeper has stored the change yet. The sweeper (every `EXPIRY_SWEEP_INTERVAL_SECONDS`, default 2) makes the stored rows agree. |
+| **Concurrency** | Applying locks the class row (`SELECT … FOR UPDATE`) in one PostgreSQL transaction, then counts and inserts; confirm and cancel are single conditional `UPDATE`s; a partial unique index allows one active hold per student per class. Holds with any number of backend processes. |
+| **Confirm** | Owner only, and only while `HELD` and unexpired; repeating it on a `CONFIRMED` hold is `200` and changes nothing. |
+| **Cancel** | `HELD` → `204` and the seat is free at once; repeat on `CANCELLED` → `204`; `CONFIRMED` → `409 hold_confirmed` (a paid seat is not released through this API, there is no refund flow); expired → `409 hold_expired`. |
+| **Duplicate / full** | The duplicate check runs first, so a student who already holds the last seat gets `already_applied`, not `no_seats_available`. A student may apply again after a cancellation or an expiry. |
+| **Other student's hold** | `403 not_your_hold` (hold ids are unguessable and `GET /holds/{id}` already shows existence). |
+| **Errors** | Every error body is `{ "error": "<code>", "message": "<sentence for a person>" }`, including framework errors. |
+| **CORS** | Any origin, header and method: identity is a plain header, there are no cookies or credentials. |
+| **Polling** | Class list every 4 s; application and My Applications every 15 s (and right after an expiry, and when the tab regains focus); the countdown runs locally every second. |
+| **Docker** | Fixed compose project name, Postgres not published on the host, backend on 8080, frontend on 3000, healthcheck-ordered start. |
+
+Error codes by status:
+
+| Status | Codes |
+|---|---|
+| `400` | `validation_failed`, `invalid_request`, `student_id_required`, `invalid_student_id` |
+| `403` | `not_your_hold` |
+| `404` | `class_not_found`, `hold_not_found`, `not_found` |
+| `405` | `method_not_allowed` |
+| `409` | `already_applied`, `no_seats_available`, `hold_expired`, `hold_cancelled`, `hold_confirmed`, `hold_state_changed` |
+| `503` | `service_busy` (database overloaded or deadlock victim; `Retry-After: 2`) |
+| `500` | `internal_error` |
 
 ## Identifiers
 

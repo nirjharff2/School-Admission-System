@@ -1,17 +1,27 @@
 # AI Usage
 
+## Summary
+
+AI wrote most of the code, tests and documents in this repository; a human set the task, supplied the brief and decides what to submit. Every AI claim that mattered was checked by running something (tests, a real two-process run, a browser against a real backend), and the mistakes that this found are listed honestly further down.
+
 ## Tools used
 
-- Claude Code (Anthropic) — scaffolding, implementation and tests, driven feature by feature.
+- **Claude (Anthropic)**, through a coding-agent command-line tool, for design, implementation, tests, Docker files and documentation, working feature by feature with small commits.
+- **A second, separate AI agent session ("the reviewer")** was asked after each feature to find defects and not to praise: it re-ran the build and tests, started the real stack, drove the UI in a headless browser, fired load bursts and race conditions, and read the code for things the tests cannot see. Where its findings changed a design they are called "the reviewer" in this file and in `ASSUMPTIONS.md`.
+- Headless Chromium (driven by script), Docker/Testcontainers and `curl` were the instruments for checking the AI's work; they are not AI.
 
 ## Where AI was used
 
 - Repository skeleton: backend/frontend scaffolds, docker-compose, docs skeletons.
-- Database schema (EF Core entities, migration), class endpoints, uniform error handling, and the Postgres-backed integration tests (Testcontainers).
+- Database schema (EF Core entities, migrations), class endpoints, uniform error handling, and the Postgres-backed integration tests (Testcontainers).
 - Seat holds: student-id validation, `HOLD_DURATION_SECONDS` handling, `POST /classes/{id}/holds`, `GET /holds/{id}`, `GET /me/holds` and their tests.
 - Confirm and cancel: `POST /holds/{id}/confirm`, `DELETE /holds/{id}` (single conditional UPDATE each), the cancel-after-confirm policy and their tests, including a 20-way parallel confirm.
 - Expiry sweeper: the `BackgroundService`, its interval setting and tests (real 1-second holds and sweeper on a separate database, two instances on one database); the sweeper tests were also checked by temporarily disabling the service and confirming they fail.
 - Capacity invariant: the class-row lock transaction in `POST /classes/{id}/holds`, the partial unique index migration and its 409 mapping, the connection-pool bound and the tests; the lock test was checked by temporarily removing `FOR UPDATE` and confirming the burst test then fails.
+- Concurrency test suite: 200 requests for 10 seats, 50 parallel confirms, two backend instances on one database.
+- Frontend: app shell and student-ID box, API client, Create Class / Class List / Application / My Applications screens, live countdown and polling, the error banner and boundaries, all exercised in a browser against a real backend.
+- Docker: backend and frontend Dockerfiles, the compose stack and its healthchecks, checked with a clean `docker compose up --build`, a `down`/`up` data-survival check and a black-box API check.
+- Documentation: `README.md`, `ASSUMPTIONS.md` and this file.
 
 ## Where the AI was wrong, and how it was caught
 
