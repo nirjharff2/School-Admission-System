@@ -93,28 +93,60 @@ public class OverloadAndMigrationTests(ApiFixture api)
     }
 
     [Fact]
-    public async Task The_gate_admits_only_its_limit_at_a_time_and_waiting_honours_cancellation()
+    public async Task The_gate_admits_only_its_per_class_limit_and_waiting_honours_cancellation()
     {
-        var gate = new ClassWriteGate(2);
-        var first = await gate.EnterAsync(CancellationToken.None);
-        var second = await gate.EnterAsync(CancellationToken.None);
+        var gate = new ClassWriteGate(totalLimit: 10, perClassLimit: 2);
+        var first = await gate.EnterAsync("c_a", CancellationToken.None);
+        var second = await gate.EnterAsync("c_a", CancellationToken.None);
 
-        var third = gate.EnterAsync(CancellationToken.None);
+        var third = gate.EnterAsync("c_a", CancellationToken.None);
         await Task.Delay(100);
         Assert.False(third.IsCompleted);
 
         using var cts = new CancellationTokenSource(100);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => gate.EnterAsync(cts.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => gate.EnterAsync("c_a", cts.Token));
 
         first.Dispose();
         first.Dispose(); // releasing twice must not hand out an extra slot
         using var thirdSlot = await third.WaitAsync(TimeSpan.FromSeconds(5));
-        var fourth = gate.EnterAsync(CancellationToken.None);
+        var fourth = gate.EnterAsync("c_a", CancellationToken.None);
         await Task.Delay(100);
         Assert.False(fourth.IsCompleted);
 
         second.Dispose();
         using var fourthSlot = await fourth.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task A_full_class_queue_does_not_block_other_classes_and_the_process_wide_cap_still_applies()
+    {
+        var gate = new ClassWriteGate(totalLimit: 3, perClassLimit: 1);
+        var busyClass = "c_busy";
+        var otherClass = Enumerable.Range(0, 1000).Select(i => $"c_other{i}")
+            .First(id => ClassWriteGate.StripeOf(id) != ClassWriteGate.StripeOf(busyClass));
+        var held = await gate.EnterAsync(busyClass, CancellationToken.None);
+
+        var waiting = gate.EnterAsync(busyClass, CancellationToken.None); // queues on its class, holds no process-wide slot
+        await Task.Delay(100);
+        Assert.False(waiting.IsCompleted);
+
+        // A class that is not busy gets in at once, even though the busy class has requests waiting.
+        using var other = await gate.EnterAsync(otherClass, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(2));
+
+        // The process-wide cap is 3: the busy class's holder and "other" use two; a third class takes the last, a fourth waits.
+        var thirdClass = Enumerable.Range(0, 1000).Select(i => $"c_third{i}")
+            .First(id => new[] { busyClass, otherClass }.All(c => ClassWriteGate.StripeOf(c) != ClassWriteGate.StripeOf(id)));
+        var fourthClass = Enumerable.Range(0, 1000).Select(i => $"c_fourth{i}")
+            .First(id => new[] { busyClass, otherClass, thirdClass }.All(c => ClassWriteGate.StripeOf(c) != ClassWriteGate.StripeOf(id)));
+        using var third = await gate.EnterAsync(thirdClass, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(2));
+        var fourth = gate.EnterAsync(fourthClass, CancellationToken.None);
+        await Task.Delay(100);
+        Assert.False(fourth.IsCompleted);
+
+        other.Dispose();
+        using var fourthSlot = await fourth.WaitAsync(TimeSpan.FromSeconds(5));
+        held.Dispose();
+        using var waitingSlot = await waiting.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -231,10 +263,11 @@ public class OverloadAndMigrationTests(ApiFixture api)
     }
 
     [Fact]
-    public async Task A_confirm_sent_during_a_big_burst_of_applications_is_answered_in_seconds_not_after_the_whole_queue()
+    public async Task A_confirm_and_an_application_to_another_class_sent_during_a_big_burst_are_answered_in_seconds()
     {
         const int seats = 500;
         var classId = await CreateClassAsync(_client, seats);
+        var otherClassId = await CreateClassAsync(_client, 20);
         var payer = NewStudentId();
         var holdId = await ApplyAsync(_client, classId, payer);
 
@@ -244,11 +277,17 @@ public class OverloadAndMigrationTests(ApiFixture api)
 
         var watch = System.Diagnostics.Stopwatch.StartNew();
         var confirm = await SendAsync(_client, HttpMethod.Post, $"/holds/{holdId}/confirm", payer);
-        watch.Stop();
+        var confirmTook = watch.Elapsed;
+        watch.Restart();
+        var other = await SendAsync(_client, HttpMethod.Post, $"/classes/{otherClassId}/holds", NewStudentId());
+        var otherTook = watch.Elapsed;
 
         Assert.Equal(HttpStatusCode.OK, confirm.StatusCode);
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(6),
-            $"confirm took {watch.Elapsed.TotalSeconds:0.0}s behind {seats - 1} queued applications");
+        Assert.True(confirmTook < TimeSpan.FromSeconds(6),
+            $"confirm took {confirmTook.TotalSeconds:0.0}s behind {seats - 1} queued applications");
+        Assert.Equal(HttpStatusCode.Created, other.StatusCode);
+        Assert.True(otherTook < TimeSpan.FromSeconds(6),
+            $"an application to an idle class took {otherTook.TotalSeconds:0.0}s behind a burst on another class");
 
         var statuses = await Task.WhenAll(burst);
         Assert.All(statuses, s => Assert.Equal(HttpStatusCode.Created, s));

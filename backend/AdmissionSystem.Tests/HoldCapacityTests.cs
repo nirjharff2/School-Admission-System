@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using System.Net;
 using AdmissionSystem.Api.Data;
 using AdmissionSystem.Api.Domain;
@@ -148,6 +150,39 @@ public class HoldCapacityTests(ApiFixture api)
         Assert.Equal(1, responses.Count(r => r.StatusCode == HttpStatusCode.Created));
         Assert.Equal(19, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
         Assert.Equal(1, await CountHolds(classId, HoldStatus.HELD));
+    }
+
+    [Fact]
+    public async Task The_sweeper_and_applications_expiring_the_same_lapsed_holds_never_deadlock_or_fail()
+    {
+        // Both statements update many rows and used to lock them in different orders (the application's by student, the
+        // sweeper's by physical position), which PostgreSQL resolves by aborting one with a deadlock: a 500 for the
+        // applicant, a failed sweep. Each round seeds a couple of hundred lapsed holds in shuffled order, then starts a
+        // sweep at a random few-millisecond offset from an application to the same class, so across rounds the two
+        // UPDATEs overlap at every possible alignment.
+        var sweeper = api.Services.GetServices<IHostedService>().OfType<ExpirySweeper>().Single();
+        var random = new Random(12345);
+
+        for (var round = 0; round < 80; round++)
+        {
+            var classId = await CreateClassAsync(_client, 1000);
+            var lapsed = Enumerable.Range(0, 200)
+                .Select(_ => NewHold(classId, NewStudentId(), HoldStatus.HELD, DateTime.UtcNow.AddSeconds(-random.Next(1, 3000))))
+                .ToArray();
+            await SeedAsync(lapsed);
+
+            var offsetMs = random.Next(0, 20);
+            var sweep = Task.Run(async () =>
+            {
+                await Task.Delay(offsetMs);
+                return await sweeper.SweepOnceAsync(CancellationToken.None); // throws if the sweep was a deadlock victim
+            });
+            var apply = SendAsync(_client, HttpMethod.Post, $"/classes/{classId}/holds", NewStudentId());
+            await Task.WhenAll(sweep, apply);
+
+            Assert.Equal(HttpStatusCode.Created, (await apply).StatusCode);
+            Assert.Equal(0, await CountHolds(classId, HoldStatus.HELD) - 1); // only the new hold is still HELD
+        }
     }
 
     // ---- helpers --------------------------------------------------------------------------------------------
