@@ -1,3 +1,9 @@
+# docker compose up --build
+#   frontend  http://localhost:3000   (FRONTEND_PORT)
+#   backend   http://localhost:8080   (BACKEND_PORT)
+# Everything has a default; no .env file is needed.
+name: school-admission
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -5,8 +11,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-admission}
       POSTGRES_USER: ${POSTGRES_USER:-admission}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admission}
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -14,6 +18,49 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  backend:
+    build: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=${POSTGRES_DB:-admission};Username=${POSTGRES_USER:-admission};Password=${POSTGRES_PASSWORD:-admission}
+      HOLD_DURATION_SECONDS: ${HOLD_DURATION_SECONDS:-600}
+      EXPIRY_SWEEP_INTERVAL_SECONDS: ${EXPIRY_SWEEP_INTERVAL_SECONDS:-2}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    healthcheck:
+      # the runtime image has neither curl nor wget: speak HTTP through bash's /dev/tcp
+      test:
+        - CMD-SHELL
+        - >-
+          bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 &&
+          printf "GET /classes HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 &&
+          head -n 1 <&3 | grep -q " 200 "'
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # the address the BROWSER uses for the API (baked into the bundle at build time)
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:${BACKEND_PORT:-8080}}
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
 
 volumes:
   pgdata:
