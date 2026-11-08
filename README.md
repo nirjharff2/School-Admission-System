@@ -14,8 +14,27 @@ Currently this starts PostgreSQL only. Backend (http://localhost:8080) and front
 
 ## Run tests
 
+Backend (from the repository root):
+
 ```bash
 dotnet test backend
+```
+
+Prerequisites: .NET 8 SDK or newer, and a **running Docker daemon**. The tests start their own throw-away `postgres:16-alpine` container through Testcontainers (no manual database, no free port needed, the container is removed afterwards), so they run against real PostgreSQL, real migrations and real SQL. The first run pulls the image. The full suite takes about a minute.
+
+The concurrency tests are in `backend/AdmissionSystem.Tests/ConcurrencyTests.cs`; run just them with:
+
+```bash
+dotnet test backend --filter "FullyQualifiedName~ConcurrencyTests"
+```
+
+- 200 simultaneous applications (distinct 17-digit student ids) for a 10-seat class: exactly 10 x `201`, 190 x `409`, `heldSeats` 10, `availableSeats` 0.
+- 50 simultaneous confirms of one hold: all `200`, `confirmedSeats` 1.
+- The same 200 applications split over two backend instances sharing one database: still exactly 10 x `201`.
+
+Frontend build check:
+
+```bash
 npm --prefix frontend run build
 ```
 
