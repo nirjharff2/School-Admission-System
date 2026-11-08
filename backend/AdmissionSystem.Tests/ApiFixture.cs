@@ -14,6 +14,9 @@ public abstract class PostgresApiFactory(int holdDurationSeconds, int sweepInter
 
     public async Task InitializeAsync() => await _postgres.StartAsync();
 
+    /// <summary>Connection string of the throw-away server (database "postgres"), for tests that need their own database.</summary>
+    public string ConnectionString => _postgres.GetConnectionString();
+
     async Task IAsyncLifetime.DisposeAsync()
     {
         await base.DisposeAsync();
