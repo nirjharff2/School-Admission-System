@@ -24,7 +24,7 @@ Settings (all optional, set as environment variables or in a `.env` file next to
 |---|---|---|
 | `HOLD_DURATION_SECONDS` | `600` | how long a seat hold lasts before it expires |
 | `EXPIRY_SWEEP_INTERVAL_SECONDS` | `2` | how often the backend stores lapsed holds as `EXPIRED` |
-| `FRONTEND_PORT` / `BACKEND_PORT` | `3000` / `8080` | published host ports |
+| `FRONTEND_PORT` / `BACKEND_PORT` | `3000` / `8080` | published host ports; after changing `BACKEND_PORT` run `docker compose up --build` (the frontend image contains the API address) |
 | `VITE_API_BASE_URL` | `http://localhost:8080` (follows `BACKEND_PORT`) | API address the **browser** uses; baked into the frontend image at build time, so rebuild (`--build`) after changing it |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | `admission` | database name and credentials |
 
