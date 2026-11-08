@@ -1,0 +1,24 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+TestResults/
+.vs/
+
+# Node
+node_modules/
+dist/
+*.log
+.env
+.env.local
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# local helper
+.npmrun.cjs
