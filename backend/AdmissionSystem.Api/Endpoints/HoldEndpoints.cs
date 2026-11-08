@@ -33,13 +33,14 @@ public static class HoldEndpoints
         // The gate slot is taken before any database access. Connections are handed out first come, first served, so if
         // thousands of applications each queued for a connection to run their first query, anything else needing one
         // (a confirm, a page refresh) would wait behind all of them. With the slot first, at most a few dozen requests
-        // are ever waiting for or using a connection, and the rest wait in memory.
+        // are ever waiting for or using a connection, and the rest wait in memory. The gate is per class (under a cap for
+        // the whole process) so a burst on one class cannot hold up applications to another.
         // Everything after that runs in one transaction that first locks the class row. Concurrent applications for the
         // same class (from any thread or any backend process) queue up on that lock, so each one counts and inserts
         // against the committed result of the one before it: heldSeats + confirmedSeats can never pass totalSeats.
         // READ COMMITTED is enough: every statement after the lock sees all holds committed by earlier lock holders.
         // The gate is a throughput guard; it is not what makes this correct.
-        using var slot = await gate.EnterAsync(ct);
+        using var slot = await gate.EnterAsync(classId, ct);
 
         // Fast refusal, no lock. A student who already has an active application, or a class that is already full, is
         // answered from one plain read. In a burst every request arrives before anyone has been granted anything, but by
@@ -60,12 +61,10 @@ public static class HoldEndpoints
         var now = clock.GetUtcNow().UtcDateTime;
 
         // Store every lapsed HELD hold of this class as EXPIRED before counting (the sweeper may not have got to them yet).
-        // That keeps this student's own lapsed hold from counting or tripping the unique index, and, because the UPDATE
-        // takes each row's lock, it serializes with a confirm that is changing one of those rows at this very moment
-        // (see the comment above ConfirmHold).
-        await db.Holds
-            .Where(h => h.ClassId == classId && h.Status == HoldStatus.HELD && h.ExpiresAt <= now)
-            .ExecuteUpdateAsync(s => s.SetProperty(h => h.Status, HoldStatus.EXPIRED), ct);
+        // That keeps this student's own lapsed hold from counting or tripping the unique index, and, because it takes each
+        // row's lock, it serializes with a confirm that is changing one of those rows at this very moment (see the comment
+        // above ConfirmHold). The rows are locked in id order, the same order the sweeper uses (see HoldExpiry).
+        await HoldExpiry.ExpireLapsedInClassAsync(db, classId, now, ct);
 
         var isActive = Hold.IsActive(now);
 

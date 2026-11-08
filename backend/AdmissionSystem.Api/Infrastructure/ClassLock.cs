@@ -22,32 +22,57 @@ public static class ClassLock
 }
 
 /// <summary>
-/// Limits how many requests per process may be inside a class-lock transaction at once, so the rest wait in memory instead
-/// of each pinning a pooled connection while queueing on the row lock. Without it a burst of a few thousand applications
-/// exhausts the connection pool and fails requests with 500. This is a throughput guard only: correctness comes from the
-/// database lock, which is also what protects against other processes.
+/// Limits how many applications per process may be doing database work at once, so the rest wait in memory instead of
+/// each pinning a pooled connection while queueing on the class row lock. Without it a burst of a few thousand
+/// applications exhausts the connection pool and fails requests. A request needs a slot for its own class AND a slot from
+/// the process-wide cap, taken in that order: a burst on one class fills only that class's few slots, waits there, and
+/// never holds process-wide slots while it waits, so applications to other classes are not held up. This is a throughput
+/// guard only: correctness comes from the database lock, which also protects against other processes.
 /// </summary>
-public sealed class ClassWriteGate(int limit)
+public sealed class ClassWriteGate(int totalLimit, int perClassLimit)
 {
-    private readonly SemaphoreSlim _slots = new(limit, limit);
+    private const int Stripes = 64;
 
-    public int Limit { get; } = limit;
+    private readonly SemaphoreSlim _total = new(totalLimit, totalLimit);
 
-    /// <summary>Half the connection pool (15 of the default 30), leaving the rest for reads, confirms, the sweeper and migrations.</summary>
+    // A fixed set of per-class gates, picked by hash of the class id, instead of one per id seen: ids come from the URL,
+    // so a dictionary keyed by them would grow without bound. Two classes sharing a stripe (1 in 64) only share a queue.
+    private readonly SemaphoreSlim[] _perClass =
+        Enumerable.Range(0, Stripes).Select(_ => new SemaphoreSlim(perClassLimit, perClassLimit)).ToArray();
+
+    /// <summary>Which per-class gate a class id uses (classes in the same stripe share one queue).</summary>
+    public static int StripeOf(string classId) => (int)((uint)classId.GetHashCode() % Stripes);
+
+    /// <summary>
+    /// Half the connection pool process-wide (15 of the default 30) and a fifth of that per class (3), leaving the rest of
+    /// the pool for reads, confirms, the sweeper and migrations. The class row lock admits one transaction at a time
+    /// anyway, so a few in flight per class keep it saturated.
+    /// </summary>
     public static ClassWriteGate From(IConfiguration configuration)
     {
         var poolSize = new NpgsqlConnectionStringBuilder(DatabaseConnection.FromConfiguration(configuration)).MaxPoolSize;
-        return new ClassWriteGate(Math.Max(1, poolSize / 2));
+        var total = Math.Max(1, poolSize / 2);
+        return new ClassWriteGate(total, Math.Max(1, total / 5));
     }
 
-    /// <summary>Waits for a free slot; dispose the result to release it. Honours cancellation while waiting.</summary>
-    public async Task<IDisposable> EnterAsync(CancellationToken ct)
+    /// <summary>Waits for a slot for this class and one process-wide; dispose the result to release both. Honours cancellation.</summary>
+    public async Task<IDisposable> EnterAsync(string classId, CancellationToken ct)
     {
-        await _slots.WaitAsync(ct);
-        return new Slot(_slots);
+        var perClass = _perClass[(uint)classId.GetHashCode() % Stripes];
+        await perClass.WaitAsync(ct);
+        try
+        {
+            await _total.WaitAsync(ct);
+        }
+        catch
+        {
+            perClass.Release();
+            throw;
+        }
+        return new Slot(perClass, _total);
     }
 
-    private sealed class Slot(SemaphoreSlim slots) : IDisposable
+    private sealed class Slot(SemaphoreSlim perClass, SemaphoreSlim total) : IDisposable
     {
         private int _released;
 
@@ -55,7 +80,8 @@ public sealed class ClassWriteGate(int limit)
         {
             if (Interlocked.Exchange(ref _released, 1) == 0)
             {
-                slots.Release();
+                total.Release();
+                perClass.Release();
             }
         }
     }

@@ -40,16 +40,12 @@ public sealed class ExpirySweeper(
         }
     }
 
-    /// <summary>Expires every lapsed HELD hold and returns how many rows changed.</summary>
-    private async Task<int> SweepOnceAsync(CancellationToken ct)
+    /// <summary>Expires every lapsed HELD hold and returns how many rows changed. One run of the loop; also callable directly.</summary>
+    public async Task<int> SweepOnceAsync(CancellationToken ct)
     {
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AdmissionDbContext>();
-        var now = clock.GetUtcNow().UtcDateTime;
-
-        return await db.Holds
-            .Where(h => h.Status == HoldStatus.HELD && h.ExpiresAt <= now)
-            .ExecuteUpdateAsync(s => s.SetProperty(h => h.Status, HoldStatus.EXPIRED), ct);
+        return await HoldExpiry.ExpireAllLapsedAsync(db, clock.GetUtcNow().UtcDateTime, ct);
     }
 
     // A database that is briefly unreachable must not take the whole API down (an exception escaping a

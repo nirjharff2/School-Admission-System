@@ -12,8 +12,9 @@ public static class PostgresErrors
         && pg.ConstraintName == constraintName;
 
     /// <summary>
-    /// True if the failure means the database could not serve the request in time: the connection pool stayed exhausted
-    /// until its timeout, a command or lock wait timed out, or the server refused the connection as full.
+    /// True if the failure means the database could not serve the request right now but the same request is expected to
+    /// work if tried again: the connection pool stayed exhausted until its timeout, a command or lock wait timed out, the
+    /// server refused the connection as full, or this transaction was chosen as the victim of a deadlock.
     /// </summary>
     public static bool IsOverload(Exception exception)
     {
@@ -22,7 +23,8 @@ public static class PostgresErrors
             switch (e)
             {
                 case TimeoutException:
-                case PostgresException { SqlState: PostgresErrorCodes.TooManyConnections or PostgresErrorCodes.LockNotAvailable or PostgresErrorCodes.QueryCanceled }:
+                case PostgresException { SqlState: PostgresErrorCodes.TooManyConnections or PostgresErrorCodes.LockNotAvailable
+                                                   or PostgresErrorCodes.QueryCanceled or PostgresErrorCodes.DeadlockDetected }:
                     return true;
             }
         }
