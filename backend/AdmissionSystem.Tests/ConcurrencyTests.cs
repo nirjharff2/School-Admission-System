@@ -19,7 +19,7 @@ public class ConcurrencyTests(ApiFixture api)
     /// <summary>Starts all <paramref name="count"/> requests behind one gate, opens the gate and returns every response.</summary>
     private static async Task<HttpResponseMessage[]> FireTogetherAsync(int count, Func<int, Task<HttpResponseMessage>> send)
     {
-        var gate = new TaskCompletionSource();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var inFlight = Enumerable.Range(0, count).Select(i => Task.Run(async () =>
         {
             await gate.Task;
