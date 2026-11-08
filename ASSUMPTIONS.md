@@ -76,6 +76,15 @@ Decisions the specification left open, each with its reasoning.
 - Apply is disabled while the student id is invalid, while the class shows 0 available seats ("Full" next to it), and while another Apply is in flight (no double submit). The button's tooltip says why it is disabled. Seat counts on screen can be stale, so the server still decides: `409 no_seats_available` and `409 already_applied` messages from the backend are shown above the table as they are, and the user stays on the list. Success goes to `#/application/{holdId}`.
 - Button label is "Apply (আবেদন করুন)" (English with the Bengali wording from the brief).
 
+## Frontend: application detail and my applications
+
+- The application screen (`#/application/{holdId}`) shows what `GET /holds/{id}` returns (no header needed, so anyone with the id can look at the status) plus the class name from `GET /classes/{classId}`; if that second call fails the class id is shown instead and the status is still usable. The Pay and Cancel buttons need the student id: with an invalid id they are disabled with a tooltip and a hint.
+- Pay ("Pay admission fee (ভর্তি ফি দিন)") and Cancel ("Cancel (বাতিল)") are enabled only while the status shown is `HELD`, and only one action runs at a time. The page shows the new status from the response at once and refetches in the background to confirm it. Cancel asks once more inline ("Yes, cancel it" / "Keep it"), because it releases the seat and a mis-click should not do that.
+- The server decides, the screen only mirrors it: a refused action (`hold_expired`, `not_your_hold`, `hold_confirmed`, ...) shows the backend's message and refetches the hold, so a stale `HELD` turns into `EXPIRED` right after the refusal. Until live expiry is built (separate step), a hold that lapsed while the page was open still shows `HELD` with the buttons enabled until the next fetch.
+- `Expires at` is shown in the browser's local time and format (`toLocaleString`); the status text is the API value unchanged (`HELD`, `CONFIRMED`, `EXPIRED`, `CANCELLED`).
+- My Applications is keyed by the student id: changing the id shows the loading state and then that student's list (an invalid id shows the "enter a valid ID" message and fetches nothing). It lists the backend's order (newest first), each row linking to the detail screen. Data is fetched when the screen opens; there is no polling yet.
+- Loading and refetching go through one hook (`useLoad`): a failed background refetch keeps the data already on screen; an error on the first load offers "Try again".
+
 ## Frontend polling interval
 
 _To be filled in._
