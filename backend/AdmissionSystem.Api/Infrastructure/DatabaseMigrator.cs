@@ -13,8 +13,8 @@ public static class DatabaseMigrator
 
     /// <summary>
     /// Applies pending migrations while holding a PostgreSQL advisory lock. EF Core 8 does not lock the database while
-    /// migrating, so two backend instances starting together on a fresh database (docker compose starting backend and
-    /// backend2 at once) race on creating the migration history table and one of them crashes at startup. With the lock the
+    /// migrating, so two backend instances starting together on a fresh database race on creating the migration history
+    /// table and one of them crashes at startup. With the lock the
     /// second instance waits, then finds nothing left to apply.
     /// </summary>
     public static async Task MigrateAsync(AdmissionDbContext db, CancellationToken ct = default)
