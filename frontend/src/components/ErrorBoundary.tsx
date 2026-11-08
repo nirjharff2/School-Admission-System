@@ -8,18 +8,19 @@ interface Props {
 
 interface State {
   failed: boolean
+  resetKey: string | undefined
 }
 
 /** Last line of defence: a rendering error shows a readable message and a way out instead of a blank page. */
 export default class ErrorBoundary extends Component<Props, State> {
-  state: State = { failed: false }
+  state: State = { failed: false, resetKey: this.props.resetKey }
 
-  static getDerivedStateFromError(): State {
+  static getDerivedStateFromError(): Partial<State> {
     return { failed: true }
   }
 
-  componentDidUpdate(previous: Props) {
-    if (this.state.failed && previous.resetKey !== this.props.resetKey) this.setState({ failed: false })
+  static getDerivedStateFromProps(props: Props, state: State): Partial<State> | null {
+    return props.resetKey === state.resetKey ? null : { failed: false, resetKey: props.resetKey }
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
