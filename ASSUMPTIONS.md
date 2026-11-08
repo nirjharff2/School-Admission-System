@@ -4,7 +4,7 @@ Decisions the specification left open, each with its reasoning.
 
 ## Identifiers
 
-- Class ids are `c_` + 16 lower-case hex characters (64 random bits from a cryptographic RNG), e.g. `c_3f9a1b7c5d2e4a68`. Hold ids will use the same scheme with prefix `h_`.
+- Class ids are `c_` + 16 lower-case hex characters (64 random bits from a cryptographic RNG), e.g. `c_3f9a1b7c5d2e4a68`. Hold ids use the same scheme with prefix `h_`.
 - Reason: opaque, non-guessable, non-sequential (no count leak), short enough to read out, and generated in the application so no database round trip or sequence is needed. Uniqueness is guaranteed by the primary key; a collision (about 1 in 10^19 per pair) would surface as a 500 rather than silent corruption.
 
 ## Error codes and responses
@@ -13,7 +13,10 @@ Decisions the specification left open, each with its reasoning.
 - `POST /classes`: `400 validation_failed` when `name` is missing, blank (after trimming) or longer than 200 characters, or `totalSeats` is missing, `null` or below 1. `400 invalid_request` when the body is not valid JSON or a field has the wrong type (for example `"totalSeats": "many"` or `2.5`). Accepted names are stored trimmed.
 - `GET /classes/{classId}`: `404 class_not_found` for an unknown id.
 - Unknown route → `404 not_found`; wrong HTTP method → `405 method_not_allowed`.
-- Codes for the hold endpoints are recorded here when they are implemented.
+- Student identity (`X-Student-Id`, required on `POST /classes/{id}/holds` and `GET /me/holds`): `400 student_id_required` when the header is absent or blank, `400 invalid_student_id` when it is not exactly 17 ASCII digits `0-9` (full-width or other-script digits are rejected). The header is checked before the class is looked up, so a bad header is a 400 even for an unknown class. The messages are written to be shown to a guardian as they are.
+- `POST /classes/{classId}/holds`: `404 class_not_found`; `409 already_applied` when the student already has an active hold in that class; `409 no_seats_available` when the class is full. The duplicate check runs first, so a student who already holds the last seat is told they already applied rather than that the class is full.
+- `GET /holds/{holdId}`: `404 hold_not_found`. It needs no header and returns exactly the contract fields (no `studentId`), so knowing a hold id does not reveal whose application it is.
+- `GET /me/holds`: newest application first; an empty array when the student has none.
 
 ## Configuration
 
@@ -24,11 +27,14 @@ Decisions the specification left open, each with its reasoning.
 
 ## Hold expiry mechanics
 
-_To be filled in._
+- Lifetime comes from the `HOLD_DURATION_SECONDS` environment variable (whole seconds, at least 1, default 600). An invalid value stops the app at startup instead of failing on the first request.
+- `createdAt` is the request time truncated to whole seconds and `expiresAt = createdAt + HOLD_DURATION_SECONDS` exactly, so the serialized value (`2026-11-01T04:10:00Z`, UTC, whole seconds, trailing `Z`) matches the contract example and the stored value. A hold therefore lives up to one second less than the wall-clock time since the request.
+- A hold is expired when `now >= expiresAt`. Every read computes the status: a stored `HELD` row past its `expiresAt` is reported `EXPIRED`, and it is not counted as held or as occupying a seat, whether or not any background job has rewritten the row yet.
+- Only `CONFIRMED` and unexpired `HELD` holds are "active": they occupy a seat and block a second application by the same student to the same class. `EXPIRED` and `CANCELLED` holds do neither, so a student can apply again after expiry or cancellation.
 
 ## Concurrency strategy
 
-_To be filled in._
+- Interim state: applying (`POST /classes/{id}/holds`) checks the duplicate and the free-seat count and then inserts, with no row lock, so two simultaneous requests can both pass the check. This is known and not yet acceptable for the capacity rule; the database-level guarantee is added in a later step and documented here when it lands.
 
 ## Frontend polling interval
 
