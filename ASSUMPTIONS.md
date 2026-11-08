@@ -69,6 +69,13 @@ Decisions the specification left open, each with its reasoning.
 - `VITE_API_BASE_URL` is read when the frontend is built or started (Vite inlines it); blank or unset means `http://localhost:8080`; trailing slashes are removed.
 - Error boundaries: an outer one for the whole app and one around the current screen, so a screen that crashes keeps the ID box and navigation usable; navigating to another screen retries rendering. Errors thrown in event handlers or promises are not caught by React boundaries; those paths show their own error text through the API client's `{ code, message }`.
 
+## Frontend: create class and class list
+
+- Create Class checks the same rules as the backend before sending (name trimmed, 1-200 characters, no control characters; seats a whole number from 1 to 2,147,483,647 because the backend stores a 32-bit integer) and shows each message under its field. The backend's own 400 message is still shown if it rejects something the browser accepted. After success the form is cleared and stays on the screen (an admin often adds several classes) with a link to the list; after a failure the typed values are kept.
+- Class List fetches `GET /classes` when opened. Applying does not poll yet (live refresh is a separate step, see Frontend polling interval); after a refused Apply the list is refetched, because a refusal usually means the counts on screen were stale. A failed refetch keeps the last good list on screen.
+- Apply is disabled while the student id is invalid, while the class shows 0 available seats ("Full" next to it), and while another Apply is in flight (no double submit). The button's tooltip says why it is disabled. Seat counts on screen can be stale, so the server still decides: `409 no_seats_available` and `409 already_applied` messages from the backend are shown above the table as they are, and the user stays on the list. Success goes to `#/application/{holdId}`.
+- Button label is "Apply (আবেদন করুন)" (English with the Bengali wording from the brief).
+
 ## Frontend polling interval
 
 _To be filled in._
