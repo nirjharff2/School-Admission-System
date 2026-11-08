@@ -273,15 +273,8 @@ public partial class HoldEndpointsTests(ApiFixture api)
 
     // ---- helpers --------------------------------------------------------------------------------------------
 
-    private async Task<HttpResponseMessage> Send(HttpMethod method, string path, string? studentId)
-    {
-        var request = new HttpRequestMessage(method, path);
-        if (studentId is not null)
-        {
-            request.Headers.TryAddWithoutValidation("X-Student-Id", studentId);
-        }
-        return await _client.SendAsync(request);
-    }
+    private Task<HttpResponseMessage> Send(HttpMethod method, string path, string? studentId) =>
+        SendAsync(_client, method, path, studentId);
 
     private async Task<string?> StatusOf(string holdId) =>
         (await ReadJsonAsync(await _client.GetAsync($"/holds/{holdId}"))).GetProperty("status").GetString();

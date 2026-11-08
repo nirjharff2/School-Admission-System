@@ -7,6 +7,25 @@ namespace AdmissionSystem.Tests;
 /// <summary>Helpers shared by the API test classes.</summary>
 internal static class TestSupport
 {
+    /// <summary>Sends a request, adding the X-Student-Id header only when <paramref name="studentId"/> is not null.</summary>
+    public static async Task<HttpResponseMessage> SendAsync(HttpClient client, HttpMethod method, string path, string? studentId)
+    {
+        var request = new HttpRequestMessage(method, path);
+        if (studentId is not null)
+        {
+            request.Headers.TryAddWithoutValidation("X-Student-Id", studentId);
+        }
+        return await client.SendAsync(request);
+    }
+
+    /// <summary>Applies for a seat and returns the new hold's id; fails the test if the apply is not a 201.</summary>
+    public static async Task<string> ApplyAsync(HttpClient client, string classId, string studentId)
+    {
+        var response = await SendAsync(client, HttpMethod.Post, $"/classes/{classId}/holds", studentId);
+        Assert.Equal(System.Net.HttpStatusCode.Created, response.StatusCode);
+        return (await ReadJsonAsync(response)).GetProperty("holdId").GetString()!;
+    }
+
     /// <summary>A fresh valid 17-digit student id, so a test never sees holds created by another test.</summary>
     public static string NewStudentId() => string.Concat(Enumerable.Range(0, 17).Select(_ => Random.Shared.Next(10)));
 
