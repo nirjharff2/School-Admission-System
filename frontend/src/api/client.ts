@@ -33,6 +33,13 @@ export interface SchoolClass {
   availableSeats: number
 }
 
+/** What `POST /classes` returns (SPEC 4.1): the new class without seat accounting. */
+export interface CreatedClass {
+  id: string
+  name: string
+  totalSeats: number
+}
+
 export interface CreatedHold {
   holdId: string
   classId: string
@@ -122,7 +129,7 @@ const enc = encodeURIComponent
 
 export const api = {
   createClass: (name: string, totalSeats: number) =>
-    request<SchoolClass>('/classes', { method: 'POST', body: { name, totalSeats } }),
+    request<CreatedClass>('/classes', { method: 'POST', body: { name, totalSeats } }),
   listClasses: () => request<SchoolClass[]>('/classes'),
   getClass: (classId: string) => request<SchoolClass>(`/classes/${enc(classId)}`),
   apply: (classId: string, studentId: string) =>
