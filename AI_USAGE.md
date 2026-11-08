@@ -9,6 +9,7 @@
 - Repository skeleton: backend/frontend scaffolds, docker-compose, docs skeletons.
 - Database schema (EF Core entities, migration), class endpoints, uniform error handling, and the Postgres-backed integration tests (Testcontainers).
 - Seat holds: student-id validation, `HOLD_DURATION_SECONDS` handling, `POST /classes/{id}/holds`, `GET /holds/{id}`, `GET /me/holds` and their tests.
+- Confirm and cancel: `POST /holds/{id}/confirm`, `DELETE /holds/{id}` (single conditional UPDATE each), the cancel-after-confirm policy and their tests, including a 20-way parallel confirm.
 
 ## Where the AI was wrong, and how it was caught
 

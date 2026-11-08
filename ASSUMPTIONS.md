@@ -17,6 +17,11 @@ Decisions the specification left open, each with its reasoning.
 - `POST /classes/{classId}/holds`: `404 class_not_found`; `409 already_applied` when the student already has an active hold in that class; `409 no_seats_available` when the class is full. The duplicate check runs first, so a student who already holds the last seat is told they already applied rather than that the class is full.
 - `GET /holds/{holdId}`: `404 hold_not_found`. It needs no header and returns exactly the contract fields (no `studentId`), so knowing a hold id does not reveal whose application it is.
 - `GET /me/holds`: newest application first; an empty array when the student has none.
+- `POST /holds/{holdId}/confirm` and `DELETE /holds/{holdId}` (both need `X-Student-Id`, validated first, then):
+  - Unknown hold → `404 hold_not_found`. Another student's hold → `403 not_your_hold` (a 403 rather than a 404: hold ids are random and unguessable, and `GET /holds/{id}` already reveals existence, so hiding it would add nothing and the 403 gives the guardian a clear message). The hold is left untouched.
+  - Confirm: `HELD` and unexpired → `200 { holdId, status: "CONFIRMED" }`. Already `CONFIRMED` → `200` again, nothing changes (idempotent, required by the spec). Expired (stored `EXPIRED`, or `HELD` past `expiresAt`) → `409 hold_expired`. `CANCELLED` → `409 hold_cancelled`. An expired hold is never revived; the guardian applies again.
+  - Cancel policy: `HELD` and unexpired → `204`, status `CANCELLED`, the seat is free at once and the student may apply again. Already `CANCELLED` → `204` (idempotent: the requested end state already holds). `CONFIRMED` → `409 hold_confirmed`: once the fee is paid the application cannot be withdrawn through this API, because there is no refund flow and silently freeing a paid seat would be wrong. Expired → `409 hold_expired` (nothing to cancel; the status stays `EXPIRED` rather than becoming `CANCELLED`).
+  - `409 hold_state_changed` exists only for the race where the hold changes between the conditional update and the follow-up read in a way the update should have caught; the client can simply retry.
 
 ## Configuration
 
@@ -35,6 +40,7 @@ Decisions the specification left open, each with its reasoning.
 ## Concurrency strategy
 
 - Interim state: applying (`POST /classes/{id}/holds`) checks the duplicate and the free-seat count and then inserts, with no row lock, so two simultaneous requests can both pass the check. This is known and not yet acceptable for the capacity rule; the database-level guarantee is added in a later step and documented here when it lands.
+- Confirm and cancel (`POST /holds/{id}/confirm`, `DELETE /holds/{id}`) are each a single conditional `UPDATE ... WHERE id = ? AND student_id = ? AND status = 'HELD' AND expires_at > now`. The row can only move out of `HELD` once, so repeated or simultaneous calls cannot count a seat twice; a test fires 20 parallel confirms at one hold and expects `confirmedSeats` to be 1. Confirming does not change `heldSeats + confirmedSeats`, so it never needs a capacity check.
 
 ## Frontend polling interval
 
