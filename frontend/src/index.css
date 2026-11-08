@@ -136,3 +136,39 @@ td {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+.badge {
+  display: inline-block;
+  padding: 0.05rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.badge-held {
+  color: var(--accent);
+}
+
+.badge-confirmed {
+  color: var(--success);
+}
+
+.badge-expired,
+.badge-cancelled {
+  color: var(--muted);
+}
+
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 1rem;
+}
+
+dt {
+  font-weight: 600;
+}
+
+dd {
+  margin: 0;
+}
