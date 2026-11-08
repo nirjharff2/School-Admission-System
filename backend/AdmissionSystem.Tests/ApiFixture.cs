@@ -22,9 +22,13 @@ public sealed class ApiFixture : WebApplicationFactory<Program>, IAsyncLifetime
         await _postgres.DisposeAsync();
     }
 
+    /// <summary>Hold lifetime the API under test is configured with.</summary>
+    public const int HoldDurationSeconds = 300;
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("ConnectionStrings:Default", _postgres.GetConnectionString());
+        builder.UseSetting("HOLD_DURATION_SECONDS", HoldDurationSeconds.ToString());
     }
 
     /// <summary>Runs <paramref name="action"/> with a DbContext on the test database (for seeding and inspection).</summary>

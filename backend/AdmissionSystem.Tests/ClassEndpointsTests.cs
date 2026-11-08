@@ -1,3 +1,4 @@
+using static AdmissionSystem.Tests.TestSupport;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
@@ -84,7 +85,7 @@ public class ClassEndpointsTests(ApiFixture api)
     [Fact]
     public async Task Seat_counts_include_only_unexpired_held_holds_and_confirmed_holds()
     {
-        var classId = await CreateClassAsync(total: 10);
+        var classId = await CreateClassAsync(_client, total: 10);
         var now = DateTime.UtcNow;
         await api.WithDbAsync(async db =>
         {
@@ -122,47 +123,6 @@ public class ClassEndpointsTests(ApiFixture api)
             StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<string> CreateClassAsync(int total)
-    {
-        var response = await _client.PostAsJsonAsync("/classes", new { name = $"Seeded {Guid.NewGuid():N}", totalSeats = total });
-        response.EnsureSuccessStatusCode();
-        return (await ReadJsonAsync(response)).GetProperty("id").GetString()!;
-    }
-
     private async Task<int> CountClassesAsync() =>
         (await ReadJsonAsync(await _client.GetAsync("/classes"))).GetArrayLength();
-
-    private static Hold NewHold(string classId, string studentId, HoldStatus status, DateTime expiresAt) => new()
-    {
-        Id = $"h_{Guid.NewGuid():N}"[..18],
-        ClassId = classId,
-        StudentId = studentId,
-        Status = status,
-        CreatedAt = expiresAt.AddMinutes(-10),
-        ExpiresAt = expiresAt,
-    };
-
-    private static async Task<JsonElement> ReadJsonAsync(HttpResponseMessage response) =>
-        JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
-
-    private static void AssertErrorBody(JsonElement body)
-    {
-        Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("error").GetString()));
-        Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("message").GetString()));
-    }
-
-    private static void AssertSeatCounts(JsonElement c, string? name, int total, int held, int confirmed, int available)
-    {
-        Assert.Equal(
-            ["availableSeats", "confirmedSeats", "heldSeats", "id", "name", "totalSeats"],
-            c.EnumerateObject().Select(p => p.Name).Order().ToArray());
-        if (name is not null)
-        {
-            Assert.Equal(name, c.GetProperty("name").GetString());
-        }
-        Assert.Equal(total, c.GetProperty("totalSeats").GetInt32());
-        Assert.Equal(held, c.GetProperty("heldSeats").GetInt32());
-        Assert.Equal(confirmed, c.GetProperty("confirmedSeats").GetInt32());
-        Assert.Equal(available, c.GetProperty("availableSeats").GetInt32());
-    }
 }
