@@ -87,7 +87,12 @@ Decisions the specification left open, each with its reasoning.
 
 ## Frontend polling interval
 
-_To be filled in._
+- **Class list: every 4 seconds** (`REFRESH_MS` in `ClassListScreen`), by polling `GET /classes`. A seat taken or released by another client shows within about 4 s (measured 4.0 s and 4.1 s in a browser against a real backend, inside the 5 s the brief allows). Polling instead of SSE/WebSocket because the backend stays a plain request/response API and 4 s of staleness is harmless: the server, not the screen, decides who gets a seat, and a refused Apply refetches at once.
+- **Application detail and My Applications: every 15 seconds while something is `HELD`, plus right after a hold's `expiresAt` and whenever the tab or window regains focus/visibility.** An application that is `CONFIRMED`, `EXPIRED` or `CANCELLED` cannot change any more, so the detail screen stops its timer for those; My Applications keeps its 15 s timer (another device can add an application).
+- Polling never runs two requests at once, never runs while the tab is hidden (it resumes with an immediate refetch when the tab is shown again), and a failed refetch keeps the last data on screen with a visible "could not be refreshed, trying again" line instead of replacing it with an error.
+- **Countdown:** the Application screen counts down to `expiresAt` locally every second from the browser clock (`useCountdown`), so it needs no requests; the screen flips to `EXPIRED` and disables Pay and Cancel at the moment the browser clock reaches `expiresAt`, with no reload, and refetches 0.5 s later to confirm with the server. My Applications flips lapsed `HELD` rows to `EXPIRED` the same way.
+- **Clock skew:** the server stays the authority. If the browser clock is ahead of the server's, the screen shows `EXPIRED` for about half a second, then the confirming refetch (sent after `expiresAt`) still says `HELD`, so the screen shows `HELD` at `0:00` with "Confirming with the server…", keeps Pay enabled, and refetches every 2 s until the server says `EXPIRED` (tested with a browser clock 10 s ahead). If the browser clock is behind, the countdown ends late and Pay may be pressed after the real expiry; the server answers `409 hold_expired` and the screen then shows `EXPIRED`. The API sends no server time, so the skew cannot be measured directly.
+
 
 ## Repository and tooling
 
