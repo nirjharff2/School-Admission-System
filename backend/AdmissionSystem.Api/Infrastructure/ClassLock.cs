@@ -33,11 +33,11 @@ public sealed class ClassWriteGate(int limit)
 
     public int Limit { get; } = limit;
 
-    /// <summary>Two thirds of the pool, leaving connections for reads, the sweeper and other instances' own traffic.</summary>
+    /// <summary>Half the connection pool (15 of the default 30), leaving the rest for reads, confirms, the sweeper and migrations.</summary>
     public static ClassWriteGate From(IConfiguration configuration)
     {
         var poolSize = new NpgsqlConnectionStringBuilder(DatabaseConnection.FromConfiguration(configuration)).MaxPoolSize;
-        return new ClassWriteGate(Math.Max(1, poolSize * 2 / 3));
+        return new ClassWriteGate(Math.Max(1, poolSize / 2));
     }
 
     /// <summary>Waits for a free slot; dispose the result to release it. Honours cancellation while waiting.</summary>
