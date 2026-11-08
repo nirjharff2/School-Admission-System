@@ -39,3 +39,4 @@ _To be filled in._
 - Solution uses the classic `.sln` format (not `.slnx`) so it builds with both the .NET 8 and newer SDKs.
 - Frontend scaffolded with the current Vite `react-ts` template (React 19, which satisfies "React 18 or newer").
 - Backend integration tests start their own throw-away `postgres:16-alpine` container through Testcontainers, so running `dotnet test backend` needs a running Docker daemon but no manual database setup or port. The tests exercise the real migrations and real SQL; an in-memory fake would not catch Npgsql/EF translation problems.
+- The API binds `http://0.0.0.0:8080` by default through the `Urls` setting in `appsettings.json` (all interfaces so it is reachable from outside a container); `ASPNETCORE_URLS` overrides it, for example to run a second instance on another port.
