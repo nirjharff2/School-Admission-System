@@ -45,7 +45,7 @@ export interface SchoolClass {
   availableSeats: number
 }
 
-/** What `POST /classes` returns (SPEC 4.1): the new class without seat accounting. */
+/** What `POST /classes` returns: the new class without seat accounting. */
 export interface CreatedClass {
   id: string
   name: string

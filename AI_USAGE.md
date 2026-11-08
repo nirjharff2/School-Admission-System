@@ -7,7 +7,7 @@ AI wrote most of the code, tests and documents in this repository; a human set t
 ## Tools used
 
 - **Claude (Anthropic)**, through a coding-agent command-line tool: design, implementation, tests, Docker files and documentation, working feature by feature with small commits.
-- **A second AI agent session** was used after each feature as an adversarial reviewer: its only job was to find defects (it re-ran builds and tests, started the real stack, drove the UI in a headless browser, fired load bursts and races). Its findings that changed the design are marked "found by a stress test" below.
+- **A second AI agent session** was used after each feature as an adversarial reviewer: its only job was to find defects (it re-ran builds and tests, started the real stack, drove the UI in a headless browser, fired load bursts and races). Several of the problems listed below, such as the connection-pool exhaustion under bursts, the deadlock and the stale-clock race, were found this way and not by the tests I had written.
 - Non-AI instruments for checking the AI's work: Testcontainers, Docker, `curl`, `netstat`, scripted headless Chromium.
 
 ## Where AI was used

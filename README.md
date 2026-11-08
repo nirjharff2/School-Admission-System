@@ -96,7 +96,7 @@ Backend (from the repository root):
 dotnet test backend
 ```
 
-Prerequisites: .NET 8 SDK or newer and a **running Docker daemon**. The tests start their own throw-away `postgres:16-alpine` container through Testcontainers (no manual database, no free port needed, the container is removed afterwards), so they run against real PostgreSQL, real migrations and real SQL. The first run pulls the image; the full suite takes about a minute.
+Prerequisites: the .NET 8 SDK (or a newer SDK plus the .NET 8 runtime, because the tests target `net8.0`) and a **running Docker daemon**. The tests start their own throw-away `postgres:16-alpine` container through Testcontainers (no manual database, no free port needed, the container is removed afterwards), so they run against real PostgreSQL, real migrations and real SQL. The first run pulls the image; the full suite takes about a minute.
 
 The required concurrency tests are in `backend/AdmissionSystem.Tests/ConcurrencyTests.cs`; run just them with:
 

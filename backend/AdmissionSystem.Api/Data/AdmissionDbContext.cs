@@ -41,7 +41,7 @@ public class AdmissionDbContext(DbContextOptions<AdmissionDbContext> options) : 
             e.HasIndex(h => new { h.ClassId, h.Status, h.ExpiresAt });
             e.HasIndex(h => new { h.StudentId, h.CreatedAt });
 
-            // Backstop for SPEC 5.3: at most one active (HELD or CONFIRMED) hold per student and class. CreateHold stays
+            // Backstop for the one-active-application rule: at most one active (HELD or CONFIRMED) hold per student and class. CreateHold stays
             // inside the class row lock, so this only fires if some other path ever skips that lock.
             e.HasIndex(h => new { h.ClassId, h.StudentId })
                 .IsUnique()

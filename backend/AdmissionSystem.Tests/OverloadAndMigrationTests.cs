@@ -319,7 +319,7 @@ public class OverloadAndMigrationTests(ApiFixture api)
         await using var db = new AdmissionDbContext(new DbContextOptionsBuilder<AdmissionDbContext>().UseNpgsql(connection).Options);
         var migrator = db.GetService<IMigrator>();
 
-        // The schema as F02-F05 left it, before the unique index.
+        // The schema before the unique-index migration.
         await migrator.MigrateAsync(db.Database.GetMigrations().First());
         var future = "now() + interval '10 minutes'";
         await db.Database.ExecuteSqlRawAsync("INSERT INTO classes (id, name, total_seats, created_at) VALUES ('c1', 'C', 50, now())");

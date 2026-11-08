@@ -98,7 +98,7 @@ Error codes by status:
 
 ## Frontend: polling and live expiry
 
-- **Class list: every 4 seconds** (`GET /classes`); a seat taken or released elsewhere shows within about 4 s (measured 4.0-4.1 s), inside the 5 s the brief allows. Polling rather than SSE/WebSocket keeps the backend a plain request/response API, and 4 s of staleness is harmless because the server decides who gets a seat.
+- **Class list: every 4 seconds** (`GET /classes`); a seat taken or released elsewhere shows within about 4 s (measured 4.0-4.1 s), which is "every few seconds" without a reload. Polling rather than SSE/WebSocket keeps the backend a plain request/response API, and 4 s of staleness is harmless because the server decides who gets a seat.
 - **Application and My Applications: every 15 seconds while something is `HELD`, plus right after a hold's `expiresAt` and whenever the tab or window regains focus.** A `CONFIRMED`, `EXPIRED` or `CANCELLED` application can no longer change, so the detail screen stops its timer for those; My Applications keeps its 15 s timer because another device can add an application.
 - Polling never runs two requests at once, never runs in a hidden tab (it refetches at once when the tab is shown again), and a failed refetch keeps the last data on screen with a "could not be refreshed" notice.
 - **Countdown:** the Application screen counts down to `expiresAt` locally every second from the browser clock (no requests), flips to `EXPIRED` and disables Pay and Cancel the moment the clock reaches `expiresAt` without a reload, and refetches 0.5 s later to confirm. My Applications flips lapsed rows the same way.
