@@ -16,7 +16,7 @@ function Screen({ route }: { route: Route }) {
     case 'application-lookup':
       return <ApplicationLookup />
     case 'application':
-      return <ApplicationScreen holdId={route.holdId} />
+      return <ApplicationScreen key={route.holdId} holdId={route.holdId} />
     case 'my-applications':
       return <MyApplicationsScreen />
     case 'not-found':
