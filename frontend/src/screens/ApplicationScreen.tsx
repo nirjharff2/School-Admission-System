@@ -2,7 +2,9 @@ import { useState, type FormEvent } from 'react'
 import { api, toFailure, type Hold, type HoldStatus } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import { formatDateTime } from '../format'
+import { formatRemaining, useCountdown } from '../hooks/useCountdown'
 import { useLoad } from '../hooks/useLoad'
+import { effectiveStatus, refreshDelayFor } from '../holdStatus'
 import { paths } from '../route'
 import { useStudentId } from '../studentId'
 
@@ -37,6 +39,9 @@ const explanation: Record<HoldStatus, string> = {
   CANCELLED: 'This application was cancelled and the seat was released.',
 }
 
+/** Seconds between status refetches while the hold is HELD (the countdown itself runs locally every second). */
+const SLOW_REFRESH_MS = 15_000
+
 interface Detail {
   hold: Hold
   /** Name of the class, or null when it could not be fetched (the class id is shown instead). */
@@ -56,10 +61,13 @@ async function loadDetail(holdId: string): Promise<Detail> {
 
 type Notice = { kind: 'success' | 'error'; text: string }
 
-/** One application: status, expiry, class, and the Pay / Cancel actions (enabled only while the hold is HELD). */
+/** One application: status, live countdown, class, and the Pay / Cancel actions (enabled only while the hold is HELD). */
 export default function ApplicationScreen({ holdId }: { holdId: string }) {
   const { studentId, valid } = useStudentId()
-  const { loaded, reload, mutate } = useLoad(holdId, () => loadDetail(holdId))
+  const { loaded, reload, mutate } = useLoad(holdId, () => loadDetail(holdId), {
+    // a confirmed, expired or cancelled application can no longer change, so only a HELD one is refetched on a timer
+    refreshDelay: (detail, now) => (detail ? refreshDelayFor([detail.hold], now, SLOW_REFRESH_MS, null) : SLOW_REFRESH_MS),
+  })
   const [busy, setBusy] = useState<'pay' | 'cancel' | null>(null)
   const [askingToCancel, setAskingToCancel] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -103,16 +111,25 @@ export default function ApplicationScreen({ holdId }: { holdId: string }) {
       )}
 
       {loaded.state === 'ready' && (
-        <ApplicationDetails
-          detail={loaded.value}
-          valid={valid}
-          busy={busy}
-          askingToCancel={askingToCancel}
-          onPay={() => void act('pay', loaded.value)}
-          onAskToCancel={() => setAskingToCancel(true)}
-          onKeep={() => setAskingToCancel(false)}
-          onCancel={() => void act('cancel', loaded.value)}
-        />
+        <>
+          <ApplicationDetails
+            detail={loaded.value}
+            requestedAt={loaded.requestedAt}
+            valid={valid}
+            busy={busy}
+            askingToCancel={askingToCancel}
+            onPay={() => void act('pay', loaded.value)}
+            onAskToCancel={() => setAskingToCancel(true)}
+            onKeep={() => setAskingToCancel(false)}
+            onCancel={() => void act('cancel', loaded.value)}
+          />
+          {loaded.refreshError && (
+            <p className="hint">
+              The latest status could not be fetched ({loaded.refreshError}). Showing the last known status; trying again
+              automatically.
+            </p>
+          )}
+        </>
       )}
 
       {notice && (
@@ -130,6 +147,7 @@ export default function ApplicationScreen({ holdId }: { holdId: string }) {
 
 interface DetailsProps {
   detail: Detail
+  requestedAt: number
   valid: boolean
   busy: 'pay' | 'cancel' | null
   askingToCancel: boolean
@@ -139,10 +157,16 @@ interface DetailsProps {
   onCancel: () => void
 }
 
-function ApplicationDetails({ detail, valid, busy, askingToCancel, onPay, onAskToCancel, onKeep, onCancel }: DetailsProps) {
+function ApplicationDetails({ detail, requestedAt, valid, busy, askingToCancel, onPay, onAskToCancel, onKeep, onCancel }: DetailsProps) {
   const { hold, className } = detail
-  const held = hold.status === 'HELD'
-  const reason = !held ? 'Only an application that is still on hold can be paid or cancelled.' : !valid ? 'Enter a valid 17-digit student ID first.' : null
+  const { now, remainingMs } = useCountdown(hold.expiresAt, hold.status === 'HELD')
+  const { status, serverDisagrees } = effectiveStatus(hold.status, hold.expiresAt, now, requestedAt)
+  const held = status === 'HELD'
+  const reason = !held
+    ? 'Only an application that is still on hold can be paid or cancelled.'
+    : !valid
+      ? 'Enter a valid 17-digit student ID first.'
+      : null
   const disabled = reason !== null || busy !== null
 
   return (
@@ -152,18 +176,34 @@ function ApplicationDetails({ detail, valid, busy, askingToCancel, onPay, onAskT
         <dd>{className ?? hold.classId}</dd>
         <dt>Status</dt>
         <dd>
-          <StatusBadge status={hold.status} />
+          <StatusBadge status={status} />
         </dd>
-        <dt>{held ? 'Expires at' : 'Hold expiry'}</dt>
-        <dd>{formatDateTime(hold.expiresAt)}</dd>
+        {held && remainingMs !== null && (
+          <>
+            <dt>Time left</dt>
+            <dd>
+              {/* role=timer is not announced on every tick; the status text below announces the change to EXPIRED */}
+              <span role="timer" className="countdown">
+                {formatRemaining(remainingMs)}
+              </span>
+              {serverDisagrees && <span className="hint"> Confirming with the server…</span>}
+            </dd>
+          </>
+        )}
+        {(status === 'HELD' || status === 'EXPIRED') && (
+          <>
+            <dt>{status === 'HELD' ? 'Expires at' : 'Expired at'}</dt>
+            <dd>{formatDateTime(hold.expiresAt)}</dd>
+          </>
+        )}
         <dt>Application ID</dt>
         <dd>
           <code>{hold.holdId}</code>
         </dd>
       </dl>
-      <p>{explanation[hold.status]}</p>
+      <p aria-live="polite">{explanation[status]}</p>
 
-      {askingToCancel ? (
+      {askingToCancel && held ? (
         <p role="alertdialog" aria-label="Confirm cancellation">
           Cancel this application and release the seat?{' '}
           <button type="button" onClick={onCancel} disabled={busy !== null}>

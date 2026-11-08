@@ -172,3 +172,8 @@ dt {
 dd {
   margin: 0;
 }
+
+.countdown {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}

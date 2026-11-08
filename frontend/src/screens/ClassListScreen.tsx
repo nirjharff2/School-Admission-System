@@ -1,49 +1,18 @@
-import { useCallback, useEffect, useState } from 'react'
-import { api, toFailure, type SchoolClass } from '../api/client'
+import { useState } from 'react'
+import { api, toFailure } from '../api/client'
+import { useLoad } from '../hooks/useLoad'
 import { paths } from '../route'
 import { useStudentId } from '../studentId'
 
-type Loaded = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; classes: SchoolClass[] }
-
-/** Loads the class list. `refresh` refetches quietly; `retry` shows the loading state again first. */
-function useClasses() {
-  const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' })
-  const [attempt, setAttempt] = useState(0)
-
-  useEffect(() => {
-    let current = true // false once a newer request started or the screen closed: its answer is dropped
-    api.listClasses().then(
-      (classes) => {
-        if (current) setLoaded({ state: 'ready', classes })
-      },
-      (error: unknown) => {
-        // a failed refresh keeps the last good list on screen; only a first load shows the error
-        if (current) {
-          setLoaded((previous) =>
-            previous.state === 'ready' ? previous : { state: 'error', message: toFailure(error).message },
-          )
-        }
-      },
-    )
-    return () => {
-      current = false
-    }
-  }, [attempt])
-
-  const refresh = useCallback(() => setAttempt((n) => n + 1), [])
-  const retry = useCallback(() => {
-    setLoaded({ state: 'loading' })
-    setAttempt((n) => n + 1)
-  }, [])
-
-  return { loaded, refresh, retry }
-}
+/** Seconds between refetches of the seat counts: a seat taken or released elsewhere shows up within this time. */
+const REFRESH_MS = 4_000
 
 export default function ClassListScreen() {
-  const { loaded, refresh, retry } = useClasses()
+  const { loaded, reload } = useLoad('classes', () => api.listClasses(), { refreshDelay: () => REFRESH_MS })
   const { studentId, valid } = useStudentId()
   const [applyingTo, setApplyingTo] = useState<string | null>(null)
-  const [applyFailure, setApplyFailure] = useState<string | null>(null)
+  // remembered with the student it was for, so it disappears when another student id is entered
+  const [applyFailure, setApplyFailure] = useState<{ studentId: string; message: string } | null>(null)
 
   async function apply(classId: string) {
     if (applyingTo) return
@@ -53,8 +22,8 @@ export default function ClassListScreen() {
       const hold = await api.apply(classId, studentId)
       window.location.hash = paths.application(hold.holdId)
     } catch (error) {
-      setApplyFailure(toFailure(error).message)
-      refresh() // the seat counts shown were stale (for example the last seat just went)
+      setApplyFailure({ studentId, message: toFailure(error).message })
+      reload() // the seat counts shown were stale (for example the last seat just went)
     } finally {
       setApplyingTo(null)
     }
@@ -64,9 +33,9 @@ export default function ClassListScreen() {
     <section>
       <h1>Classes</h1>
       {!valid && <p className="hint">Enter a valid 17-digit student ID at the top of the page to apply for a seat.</p>}
-      {applyFailure && (
+      {applyFailure?.studentId === studentId && (
         <p className="error" role="alert">
-          {applyFailure}
+          {applyFailure.message}
         </p>
       )}
 
@@ -74,17 +43,23 @@ export default function ClassListScreen() {
       {loaded.state === 'error' && (
         <div role="alert">
           <p className="error">The class list could not be loaded. {loaded.message}</p>
-          <button type="button" onClick={retry}>
+          <button type="button" onClick={reload}>
             Try again
           </button>
         </div>
       )}
-      {loaded.state === 'ready' && loaded.classes.length === 0 && (
+      {loaded.state === 'ready' && loaded.refreshError && (
+        <p className="hint">
+          The seat numbers could not be refreshed ({loaded.refreshError}). They may be out of date; trying again
+          automatically.
+        </p>
+      )}
+      {loaded.state === 'ready' && loaded.value.length === 0 && (
         <p>
           There are no classes yet. <a href={paths.createClass}>Create the first class</a>.
         </p>
       )}
-      {loaded.state === 'ready' && loaded.classes.length > 0 && (
+      {loaded.state === 'ready' && loaded.value.length > 0 && (
         <table>
           <thead>
             <tr>
@@ -99,7 +74,7 @@ export default function ClassListScreen() {
             </tr>
           </thead>
           <tbody>
-            {loaded.classes.map((c) => {
+            {loaded.value.map((c) => {
               const full = c.availableSeats <= 0
               const disabledReason = full
                 ? 'No seats are available in this class.'
