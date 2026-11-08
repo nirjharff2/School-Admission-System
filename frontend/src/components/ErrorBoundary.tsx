@@ -21,9 +21,6 @@ export default class ErrorBoundary extends Component<Props, State> {
   componentDidUpdate(previous: Props) {
     if (this.state.failed && previous.resetKey !== this.props.resetKey) this.setState({ failed: false })
   }
-  static getDerivedStateFromError(): State {
-    return { failed: true }
-  }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('Unhandled UI error', error, info.componentStack)
