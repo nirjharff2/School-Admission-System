@@ -25,25 +25,25 @@ public static class HoldEndpoints
     }
 
     private static async Task<IResult> CreateHold(
-        string classId, HttpRequest request, AdmissionDbContext db, TimeProvider clock, HoldSettings settings, CancellationToken ct)
+        string classId, HttpRequest request, AdmissionDbContext db, TimeProvider clock, HoldSettings settings,
+        ClassWriteGate gate, CancellationToken ct)
     {
         var studentId = StudentIdHeader.Require(request);
-        var now = clock.GetUtcNow().UtcDateTime;
 
         // Everything below runs in one transaction that first locks the class row. Concurrent applications for the same
         // class (from any thread or any backend process) queue up on that lock, so each one counts and inserts against
         // the committed result of the one before it: heldSeats + confirmedSeats can never pass totalSeats.
         // READ COMMITTED is enough: every statement after the lock sees all holds committed by earlier lock holders.
+        // The gate only keeps waiting requests from each pinning a pooled connection; it is not what makes this correct.
+        using var slot = await gate.EnterAsync(ct);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
 
-        var locked = await db.Database
-            .SqlQuery<int>($"SELECT total_seats AS \"Value\" FROM classes WHERE id = {classId} FOR UPDATE")
-            .ToListAsync(ct);
-        if (locked.Count == 0)
-        {
-            throw ApiException.NotFound(ErrorCodes.ClassNotFound, "This class does not exist.");
-        }
-        var totalSeats = locked[0];
+        var totalSeats = await ClassLock.AcquireAsync(db, classId, ct)
+            ?? throw ApiException.NotFound(ErrorCodes.ClassNotFound, "This class does not exist.");
+
+        // Read the clock only now: a request that queued for seconds behind others must not stamp a stale createdAt
+        // or judge expiry with an old "now".
+        var now = clock.GetUtcNow().UtcDateTime;
 
         // The sweeper may not have stored this student's lapsed HELD hold as EXPIRED yet; do it now, under the lock, so it
         // can neither count as an application nor trip the unique index below.
@@ -121,14 +121,26 @@ public static class HoldEndpoints
             new MyHoldResponse(r.Hold.Id, r.Hold.ClassId, r.ClassName, r.Hold.EffectiveStatus(now), r.Hold.ExpiresAt)));
     }
 
-    // Confirm and cancel are each ONE conditional UPDATE. The row only changes while it is still HELD, unexpired and
-    // owned by the caller, so concurrent or repeated calls cannot move it twice and the seat counts cannot drift.
-    // Only when the UPDATE touches no row do we read the hold, to answer with the right status.
+    // Cancel is ONE conditional UPDATE: it can only move a row out of the active set, so it needs no class lock.
+    // Confirm is ONE conditional UPDATE too, but it takes the class lock first (see ConfirmHold). In both, the row only
+    // changes while it is still HELD, unexpired and owned by the caller, so concurrent or repeated calls cannot move it
+    // twice. Only when the UPDATE touches no row do we read the hold, to answer with the right status.
 
     private static async Task<IResult> ConfirmHold(
-        string holdId, HttpRequest request, AdmissionDbContext db, TimeProvider clock, CancellationToken ct)
+        string holdId, HttpRequest request, AdmissionDbContext db, TimeProvider clock, ClassWriteGate gate, CancellationToken ct)
     {
         var studentId = StudentIdHeader.Require(request);
+
+        // 404 / 403 before touching any lock, so a stranger's or unknown id never queues behind real applications.
+        var existing = await LoadOwnedHold(db, holdId, studentId, ct);
+
+        // Confirming turns an active hold into another active hold, so it cannot overbook by itself. It takes the class
+        // lock anyway, and reads the clock only after getting it, so that "is this hold still alive?" is decided in the
+        // same serial order as CreateHold's count: a hold CreateHold already treated as lapsed (and replaced) can never
+        // be revived here by a confirm that read an older clock value.
+        using var slot = await gate.EnterAsync(ct);
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await ClassLock.AcquireAsync(db, existing.ClassId, ct);
         var now = clock.GetUtcNow().UtcDateTime;
 
         var updated = await db.Holds
@@ -136,6 +148,7 @@ public static class HoldEndpoints
             .ExecuteUpdateAsync(s => s.SetProperty(h => h.Status, HoldStatus.CONFIRMED), ct);
         if (updated == 1)
         {
+            await tx.CommitAsync(ct);
             return Results.Ok(new ConfirmResponse(holdId, HoldStatus.CONFIRMED));
         }
 

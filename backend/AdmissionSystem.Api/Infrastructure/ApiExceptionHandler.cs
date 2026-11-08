@@ -7,17 +7,33 @@ public sealed class ApiExceptionHandler(ILogger<ApiExceptionHandler> logger) : I
 {
     public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception, CancellationToken cancellationToken)
     {
+        // The client went away (closed the connection, timed out): nobody is listening, and it is not a server fault.
+        if (exception is OperationCanceledException && httpContext.RequestAborted.IsCancellationRequested)
+        {
+            httpContext.Response.StatusCode = 499;
+            return true;
+        }
+
         var (status, body) = exception switch
         {
             ApiException api => (api.StatusCode, new ErrorBody(api.Error, api.Message)),
             // Malformed JSON, wrong field types, missing required body.
             BadHttpRequestException => (StatusCodes.Status400BadRequest,
                 new ErrorBody(ErrorCodes.InvalidRequest, "The request is malformed or has the wrong format.")),
+            // No database connection or lock became free in time: the system is overloaded, not broken.
+            _ when PostgresErrors.IsOverload(exception) => (StatusCodes.Status503ServiceUnavailable,
+                new ErrorBody(ErrorCodes.ServiceBusy, "The system is very busy right now. Please try again in a few seconds.")),
             _ => (StatusCodes.Status500InternalServerError,
                 new ErrorBody(ErrorCodes.InternalError, "Something went wrong on the server. Please try again.")),
         };
 
-        if (status >= 500)
+        if (status == StatusCodes.Status503ServiceUnavailable)
+        {
+            httpContext.Response.Headers.RetryAfter = "2";
+            logger.LogWarning(exception, "Overloaded for {Method} {Path}", httpContext.Request.Method, httpContext.Request.Path);
+        }
+
+        if (status == StatusCodes.Status500InternalServerError)
         {
             logger.LogError(exception, "Unhandled exception for {Method} {Path}", httpContext.Request.Method, httpContext.Request.Path);
         }
@@ -45,5 +61,6 @@ public static class ErrorCodes
     public const string HoldStateChanged = "hold_state_changed";
     public const string NotFound = "not_found";
     public const string MethodNotAllowed = "method_not_allowed";
+    public const string ServiceBusy = "service_busy";
     public const string InternalError = "internal_error";
 }

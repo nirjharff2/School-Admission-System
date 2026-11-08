@@ -10,4 +10,22 @@ public static class PostgresErrors
         exception is DbUpdateException { InnerException: PostgresException pg }
         && pg.SqlState == PostgresErrorCodes.UniqueViolation
         && pg.ConstraintName == constraintName;
+
+    /// <summary>
+    /// True if the failure means the database could not serve the request in time: the connection pool stayed exhausted
+    /// until its timeout, a command or lock wait timed out, or the server refused the connection as full.
+    /// </summary>
+    public static bool IsOverload(Exception exception)
+    {
+        for (var e = exception; e is not null; e = e.InnerException)
+        {
+            switch (e)
+            {
+                case TimeoutException:
+                case PostgresException { SqlState: PostgresErrorCodes.TooManyConnections or PostgresErrorCodes.LockNotAvailable or PostgresErrorCodes.QueryCanceled }:
+                    return true;
+            }
+        }
+        return false;
+    }
 }
