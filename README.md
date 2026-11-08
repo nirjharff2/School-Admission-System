@@ -61,6 +61,7 @@ HOLD_DURATION_SECONDS=20 docker compose up --build
 
 # Windows PowerShell
 $env:HOLD_DURATION_SECONDS = 20; docker compose up --build
+# afterwards, in the same window: Remove-Item Env:HOLD_DURATION_SECONDS
 
 # Windows cmd
 set "HOLD_DURATION_SECONDS=20" && docker compose up --build
@@ -111,7 +112,7 @@ Frontend: there is no automated test suite; `npm --prefix frontend run build` ty
 
 ## Running without Docker (development)
 
-You need the .NET 8 SDK, Node 20.19+ (or 22+) and a PostgreSQL you can reach.
+You need the .NET 8 SDK, Node 20.19+ or 22.12+, and a PostgreSQL you can reach.
 
 ```bash
 # backend, on http://localhost:8080 (applies migrations at start-up)
