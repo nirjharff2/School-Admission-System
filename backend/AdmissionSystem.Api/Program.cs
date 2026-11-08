@@ -13,15 +13,12 @@ if (string.IsNullOrEmpty(builder.Configuration["urls"]) && string.IsNullOrEmpty(
     builder.WebHost.UseUrls("http://0.0.0.0:8080");
 }
 
+// Read lazily (the first time a DbContext is built) so settings supplied by a test host are seen, then reused.
+string? databaseConnection = null;
 builder.Services.AddDbContext<AdmissionDbContext>(options =>
 {
-    var connectionString = builder.Configuration.GetConnectionString("Default");
-    if (string.IsNullOrWhiteSpace(connectionString))
-    {
-        throw new InvalidOperationException(
-            "No database connection string. Set the ConnectionStrings__Default environment variable.");
-    }
-    options.UseNpgsql(connectionString);
+    databaseConnection ??= DatabaseConnection.FromConfiguration(builder.Configuration);
+    options.UseNpgsql(databaseConnection);
 });
 
 builder.Services.AddSingleton(TimeProvider.System);

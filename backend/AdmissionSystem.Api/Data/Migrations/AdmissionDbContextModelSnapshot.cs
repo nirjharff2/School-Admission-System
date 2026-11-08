@@ -57,6 +57,15 @@ namespace AdmissionSystem.Api.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("ix_holds_held_expires_at")
+                        .HasFilter("status = 'HELD'");
+
+                    b.HasIndex("ClassId", "StudentId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_holds_active_student_class")
+                        .HasFilter("status IN ('HELD', 'CONFIRMED')");
+
                     b.HasIndex("StudentId", "CreatedAt");
 
                     b.HasIndex("ClassId", "Status", "ExpiresAt");

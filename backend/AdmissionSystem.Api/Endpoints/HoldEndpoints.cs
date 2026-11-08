@@ -28,14 +28,29 @@ public static class HoldEndpoints
         string classId, HttpRequest request, AdmissionDbContext db, TimeProvider clock, HoldSettings settings, CancellationToken ct)
     {
         var studentId = StudentIdHeader.Require(request);
-
-        var totalSeats = await db.Classes.AsNoTracking()
-            .Where(c => c.Id == classId)
-            .Select(c => (int?)c.TotalSeats)
-            .FirstOrDefaultAsync(ct)
-            ?? throw ApiException.NotFound(ErrorCodes.ClassNotFound, "This class does not exist.");
-
         var now = clock.GetUtcNow().UtcDateTime;
+
+        // Everything below runs in one transaction that first locks the class row. Concurrent applications for the same
+        // class (from any thread or any backend process) queue up on that lock, so each one counts and inserts against
+        // the committed result of the one before it: heldSeats + confirmedSeats can never pass totalSeats.
+        // READ COMMITTED is enough: every statement after the lock sees all holds committed by earlier lock holders.
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+
+        var locked = await db.Database
+            .SqlQuery<int>($"SELECT total_seats AS \"Value\" FROM classes WHERE id = {classId} FOR UPDATE")
+            .ToListAsync(ct);
+        if (locked.Count == 0)
+        {
+            throw ApiException.NotFound(ErrorCodes.ClassNotFound, "This class does not exist.");
+        }
+        var totalSeats = locked[0];
+
+        // The sweeper may not have stored this student's lapsed HELD hold as EXPIRED yet; do it now, under the lock, so it
+        // can neither count as an application nor trip the unique index below.
+        await db.Holds
+            .Where(h => h.ClassId == classId && h.StudentId == studentId && h.Status == HoldStatus.HELD && h.ExpiresAt <= now)
+            .ExecuteUpdateAsync(s => s.SetProperty(h => h.Status, HoldStatus.EXPIRED), ct);
+
         var isActive = Hold.IsActive(now);
 
         var alreadyApplied = await db.Holds
@@ -43,8 +58,7 @@ public static class HoldEndpoints
             .AnyAsync(isActive, ct);
         if (alreadyApplied)
         {
-            throw ApiException.Conflict(ErrorCodes.AlreadyApplied,
-                "You already have an active application for this class.");
+            throw AlreadyApplied();
         }
 
         var occupied = await db.Holds.Where(h => h.ClassId == classId).CountAsync(isActive, ct);
@@ -65,11 +79,23 @@ public static class HoldEndpoints
             ExpiresAt = createdAt + settings.Duration,
         };
         db.Holds.Add(hold);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+        }
+        catch (DbUpdateException ex) when (PostgresErrors.IsUniqueViolation(ex, DbConstraints.ActiveHoldPerStudentAndClass))
+        {
+            // The database's own one-active-hold-per-student-and-class rule fired: same answer as the explicit check.
+            throw AlreadyApplied();
+        }
 
         return Results.Created($"/holds/{hold.Id}",
             new HoldCreatedResponse(hold.Id, hold.ClassId, hold.StudentId, hold.Status, hold.ExpiresAt));
     }
+
+    private static ApiException AlreadyApplied() =>
+        ApiException.Conflict(ErrorCodes.AlreadyApplied, "You already have an active application for this class.");
 
     private static async Task<IResult> GetHold(string holdId, AdmissionDbContext db, TimeProvider clock, CancellationToken ct)
     {
