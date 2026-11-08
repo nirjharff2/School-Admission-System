@@ -1,44 +1,58 @@
+using System.Text.Json.Serialization;
+using AdmissionSystem.Api.Data;
+using AdmissionSystem.Api.Endpoints;
+using AdmissionSystem.Api.Infrastructure;
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddDbContext<AdmissionDbContext>(options =>
+{
+    var connectionString = builder.Configuration.GetConnectionString("Default");
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        throw new InvalidOperationException(
+            "No database connection string. Set the ConnectionStrings__Default environment variable.");
+    }
+    options.UseNpgsql(connectionString);
+});
+
+builder.Services.AddSingleton(TimeProvider.System);
+
+// JSON: camelCase (web default) and enums as strings (HELD, CONFIRMED, ...).
+builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+
+// Bad request bodies must throw in every environment so they reach ApiExceptionHandler and get the uniform error body.
+builder.Services.Configure<RouteHandlerOptions>(o => o.ThrowOnBadRequest = true);
+builder.Services.AddExceptionHandler<ApiExceptionHandler>();
+builder.Services.AddProblemDetails();
+
+builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+using (var scope = app.Services.CreateScope())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    scope.ServiceProvider.GetRequiredService<AdmissionDbContext>().Database.Migrate();
 }
 
-app.UseHttpsRedirection();
-
-var summaries = new[]
+app.UseExceptionHandler();
+// Unknown routes and wrong methods carry no body by default; give them the uniform one.
+app.UseStatusCodePages(async context =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    var response = context.HttpContext.Response;
+    var body = response.StatusCode switch
+    {
+        StatusCodes.Status404NotFound => new ErrorBody(ErrorCodes.NotFound, "The requested resource does not exist."),
+        StatusCodes.Status405MethodNotAllowed => new ErrorBody(ErrorCodes.MethodNotAllowed, "This method is not allowed on this resource."),
+        _ => new ErrorBody(ErrorCodes.InvalidRequest, "The request could not be processed."),
+    };
+    await response.WriteAsJsonAsync(body);
+});
+app.UseCors();
 
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast")
-.WithOpenApi();
+app.MapClassEndpoints();
 
 app.Run();
 
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
+public partial class Program;
