@@ -4,6 +4,7 @@
   --muted: #6b7280;
   --error: #b91c1c;
   --border: #d1d5db;
+  --success: #15803d;
   --accent: #2563eb;
 }
 
@@ -12,6 +13,7 @@
     --muted: #9ca3af;
     --error: #f87171;
     --border: #374151;
+    --success: #4ade80;
     --accent: #60a5fa;
   }
 }
@@ -87,4 +89,50 @@ nav a[aria-current='page'] {
 form label {
   display: block;
   font-weight: 600;
+}
+
+.field {
+  margin-bottom: 0.75rem;
+}
+
+.field input {
+  width: 100%;
+  max-width: 22rem;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+}
+
+.field input[aria-invalid='true'] {
+  border: 2px solid var(--error);
+}
+
+.field p {
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+}
+
+.success {
+  color: var(--success);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
