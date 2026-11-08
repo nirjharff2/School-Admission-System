@@ -33,6 +33,11 @@ public static class ErrorCodes
     public const string InvalidRequest = "invalid_request";
     public const string ValidationFailed = "validation_failed";
     public const string ClassNotFound = "class_not_found";
+    public const string HoldNotFound = "hold_not_found";
+    public const string StudentIdRequired = "student_id_required";
+    public const string InvalidStudentId = "invalid_student_id";
+    public const string AlreadyApplied = "already_applied";
+    public const string NoSeatsAvailable = "no_seats_available";
     public const string NotFound = "not_found";
     public const string MethodNotAllowed = "method_not_allowed";
     public const string InternalError = "internal_error";

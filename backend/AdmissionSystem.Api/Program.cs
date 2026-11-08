@@ -25,9 +25,15 @@ builder.Services.AddDbContext<AdmissionDbContext>(options =>
 });
 
 builder.Services.AddSingleton(TimeProvider.System);
+// Resolved lazily from IConfiguration (env var HOLD_DURATION_SECONDS) and validated at startup below.
+builder.Services.AddSingleton(sp => HoldSettings.From(sp.GetRequiredService<IConfiguration>()));
 
-// JSON: camelCase (web default) and enums as strings (HELD, CONFIRMED, ...).
-builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+// JSON: camelCase (web default), enums as strings (HELD, CONFIRMED, ...), timestamps as ISO-8601 UTC with a trailing Z.
+builder.Services.ConfigureHttpJsonOptions(o =>
+{
+    o.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    o.SerializerOptions.Converters.Add(new UtcSecondsDateTimeConverter());
+});
 
 // Bad request bodies must throw in every environment so they reach ApiExceptionHandler and get the uniform error body.
 builder.Services.Configure<RouteHandlerOptions>(o => o.ThrowOnBadRequest = true);
@@ -37,6 +43,8 @@ builder.Services.AddProblemDetails();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
 var app = builder.Build();
+
+_ = app.Services.GetRequiredService<HoldSettings>(); // fail fast on an invalid HOLD_DURATION_SECONDS
 
 using (var scope = app.Services.CreateScope())
 {
@@ -59,6 +67,7 @@ app.UseStatusCodePages(async context =>
 app.UseCors();
 
 app.MapClassEndpoints();
+app.MapHoldEndpoints();
 
 app.Run();
 
