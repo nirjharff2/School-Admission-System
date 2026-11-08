@@ -22,6 +22,18 @@ export function toFailure(error: unknown): { code: string; message: string } {
   return { code: 'unexpected_error', message: 'Something went wrong. Please try again.' }
 }
 
+/** True when asking again cannot help (the server understood and refused: 4xx other than timeout / too many requests). */
+export function isPermanentFailure(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status !== null &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.status !== 408 &&
+    error.status !== 429
+  )
+}
+
 export type HoldStatus = 'HELD' | 'CONFIRMED' | 'EXPIRED' | 'CANCELLED'
 
 export interface SchoolClass {
@@ -65,9 +77,21 @@ interface RequestOptions {
   studentId?: string
 }
 
+/** Longest wait for an answer: a hung server must not leave a button spinning or stop the polling for ever. */
+const REQUEST_TIMEOUT_MS = 15_000
+
+function isTimeout(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'TimeoutError'
+}
+
+/** Shown when the server's answer has no usable `message` (a proxy or gateway page, an unexpected status). */
 function fallbackMessage(status: number): string {
+  if (status === 429 || status === 503) return 'The server is busy right now. Please try again in a few seconds.'
   if (status >= 500) return 'The server had a problem. Please try again in a moment.'
+  if (status === 400) return 'The request was not accepted. Please check what you entered.'
+  if (status === 403) return 'You are not allowed to do that.'
   if (status === 404) return 'That item could not be found.'
+  if (status === 409) return 'That cannot be done in the current state. Please refresh and try again.'
   return 'The request could not be completed.'
 }
 
@@ -102,14 +126,19 @@ async function request<T>(path: string, { method = 'GET', body, studentId }: Req
   }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
 
+  const timedOut = () =>
+    new ApiError('timeout', 'The server took too long to answer. Please try again in a moment.')
+
   let response: Response
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
-  } catch {
+  } catch (error) {
+    if (isTimeout(error)) throw timedOut()
     throw new ApiError(
       'network_error',
       'Cannot reach the server. Check your connection and that the backend is running, then try again.',
@@ -120,7 +149,8 @@ async function request<T>(path: string, { method = 'GET', body, studentId }: Req
   if (response.status === 204) return undefined as T
   try {
     return (await response.json()) as T
-  } catch {
+  } catch (error) {
+    if (isTimeout(error)) throw timedOut()
     throw new ApiError('invalid_response', 'The server sent an answer that could not be understood.', response.status)
   }
 }

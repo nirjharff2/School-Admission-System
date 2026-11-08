@@ -1,9 +1,9 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
-import { toFailure } from '../api/client'
+import { isPermanentFailure, toFailure } from '../api/client'
 
 type Settled<T> = { key: string } & (
   | { value: T; requestedAt: number; refreshError: string | null }
-  | { error: string }
+  | { error: string; permanent: boolean }
 )
 
 export type Loaded<T> =
@@ -57,10 +57,11 @@ export function useLoad<T>(key: string | null, load: () => Promise<T>, options: 
         if (!current) return
         inFlight.current = false
         const message = toFailure(error).message
+        const permanent = isPermanentFailure(error)
         setSettled((previous) =>
           previous !== null && previous.key === key && 'value' in previous
             ? { ...previous, refreshError: message }
-            : { key, error: message },
+            : { key, error: message, permanent },
         )
       },
     )
@@ -73,6 +74,8 @@ export function useLoad<T>(key: string | null, load: () => Promise<T>, options: 
   // the next automatic refetch is scheduled after every answer (or failure), so the pace follows the data
   useEffect(() => {
     if (key === null) return
+    // a refusal that asking again cannot change (404, 400, ...) is not retried on a timer; "Try again" and focus still are
+    if (settled !== null && settled.key === key && 'error' in settled && settled.permanent) return
     const value = settled !== null && settled.key === key && 'value' in settled ? settled.value : undefined
     const delay = delayFor(value, Date.now())
     if (delay === null) return
