@@ -2,15 +2,31 @@
 
 A seat-hold system for school admissions: students place a time-limited hold on a seat in a class, then confirm or cancel it, and the backend guarantees a class is never over-booked. Backend: .NET 8 minimal API + PostgreSQL. Frontend: React + TypeScript (Vite).
 
-> Status: repository skeleton. Only PostgreSQL runs under Docker so far; the API and UI are placeholders.
-
 ## Run with Docker
 
+Prerequisite: Docker with the Compose plugin. Nothing else is installed on the host and no `.env` file is needed.
+
 ```bash
-docker compose up
+docker compose up --build
 ```
 
-Currently this starts PostgreSQL only. Backend (http://localhost:8080) and frontend containers are added in a later step.
+| What | Where |
+|---|---|
+| **Frontend (open this)** | http://localhost:3000 |
+| Backend API | http://localhost:8080 (for example `GET /classes`) |
+| PostgreSQL | inside the compose network only (not published; use `docker compose exec postgres psql -U admission admission`) |
+
+The backend applies its database migrations at start-up. Data lives in the named volume `pgdata` (project `school-admission`), so `docker compose down` followed by `docker compose up` keeps all classes and applications; `docker compose down -v` deletes them.
+
+Settings (all optional, set as environment variables or in a `.env` file next to `docker-compose.yml`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `HOLD_DURATION_SECONDS` | `600` | how long a seat hold lasts before it expires |
+| `EXPIRY_SWEEP_INTERVAL_SECONDS` | `2` | how often the backend stores lapsed holds as `EXPIRED` |
+| `FRONTEND_PORT` / `BACKEND_PORT` | `3000` / `8080` | published host ports |
+| `VITE_API_BASE_URL` | `http://localhost:8080` (follows `BACKEND_PORT`) | API address the **browser** uses; baked into the frontend image at build time, so rebuild (`--build`) after changing it |
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | `admission` | database name and credentials |
 
 ## Run tests
 
@@ -42,5 +58,6 @@ npm --prefix frontend run build
 
 - `backend/` — `AdmissionSystem.sln`, `AdmissionSystem.Api`, `AdmissionSystem.Tests`
 - `frontend/` — Vite + React + TypeScript app
-- `docker-compose.yml` — Postgres on named volume `pgdata`
+- `docker-compose.yml` — PostgreSQL (named volume `pgdata`), backend, frontend
+- `backend/Dockerfile`, `frontend/Dockerfile`
 - `ASSUMPTIONS.md`, `AI_USAGE.md`

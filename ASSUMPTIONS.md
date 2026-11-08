@@ -102,6 +102,17 @@ Decisions the specification left open, each with its reasoning.
 - Errors that React error boundaries cannot see (a rejected promise nobody caught, an exception in an event handler) are caught by `window` handlers and shown as a dismissible banner with a generic sentence (an `ApiError` keeps its own readable message). A crash while rendering a screen is caught by the per-screen error boundary, which keeps the ID box and navigation usable; navigating elsewhere retries.
 - The student ID box does not scold a number that is still being typed ("4 of 17 digits so far"); it flags the box when the text cannot become valid (a non-digit, more than 17 characters), after the box is left, or at once for an invalid ID saved from an earlier visit.
 
+## Docker and compose
+
+- Services: `postgres` (16-alpine, named volume `pgdata`, `pg_isready` healthcheck), `backend` (multi-stage .NET 8 SDK to ASP.NET runtime image, port 8080, runs as the image's non-root user, applies migrations at start-up), `frontend` (Node 22 build, then the static files served by nginx on container port 80, published on host port 3000). `docker compose up --build` needs nothing else: every setting has a default, a `.env` file is optional.
+- The compose project has a fixed name (`name: school-admission`), so the data volume is `school-admission_pgdata` whatever the folder is called, and it can never collide with a volume of another project that happens to be started from a folder with the same name.
+- PostgreSQL is not published on the host: the backend reaches it by service name inside the compose network. Publishing 5432 would fail on any machine that already runs a PostgreSQL there (this one does), and nothing outside the stack needs the database. `docker compose exec postgres psql -U admission admission` gives a shell when needed.
+- Startup order is enforced with healthchecks and `depends_on: condition: service_healthy` (backend waits for the database, the frontend waits for the backend), so `docker compose up --wait` returns only when everything answers. The backend healthcheck is a `GET /classes` that must return 200, sent with bash's `/dev/tcp` because the runtime image has neither curl nor wget; the frontend's is a `wget` of the start page.
+- `VITE_API_BASE_URL` is the address the browser uses for the API, not an address between containers, so its default is `http://localhost:8080` (it follows `BACKEND_PORT`). Vite bakes it into the JavaScript at build time: changing it needs `docker compose up --build`, not just a restart. The backend allows any origin (see Configuration), so the page on port 3000 may call the API on port 8080.
+- The frontend uses hash routes, so nginx needs no rewrite rules for refresh or pasted links.
+- Host ports are published as `${BACKEND_PORT:-8080}:8080` and `${FRONTEND_PORT:-3000}:80`: the defaults are the contract (backend on 8080), the variables exist only for machines where one of the ports is taken.
+- `backend` and `frontend` use `restart: unless-stopped` so a Docker daemon restart brings the application back; the database data survives it in the named volume. `docker compose down -v` is the only thing that deletes data.
+
 ## Repository and tooling
 
 - Solution uses the classic `.sln` format (not `.slnx`) so it builds with both the .NET 8 and newer SDKs.
