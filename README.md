@@ -22,6 +22,7 @@ The first run downloads the base images and builds both applications (several mi
 |---|---|
 | **Web UI (start here)** | **http://localhost:3000** |
 | Backend API | http://localhost:8080 (try http://localhost:8080/classes) |
+| Second backend API (same database) | http://localhost:8081 |
 
 PostgreSQL is only reachable inside the compose network (it is not published on a host port, so it cannot clash with a PostgreSQL you already run). For a SQL shell: `docker compose exec postgres psql -U admission admission`.
 
@@ -46,6 +47,7 @@ All settings are optional environment variables for `docker compose` (or lines i
 | `HOLD_DURATION_SECONDS` | `600` | how long a seat hold lasts before it expires |
 | `EXPIRY_SWEEP_INTERVAL_SECONDS` | `2` | how often the backend stores lapsed holds as `EXPIRED` |
 | `FRONTEND_PORT` / `BACKEND_PORT` | `3000` / `8080` | published host ports; after changing `BACKEND_PORT` run `docker compose up --build` (the frontend image contains the API address) |
+| `BACKEND2_PORT` | `8081` | published host port of the second backend container |
 | `VITE_API_BASE_URL` | `http://localhost:8080` (follows `BACKEND_PORT`) | API address the **browser** uses; baked into the frontend image at build time, so rebuild (`--build`) after changing it |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | `admission` | database name and credentials |
 
@@ -88,6 +90,22 @@ JSON over HTTP on port 8080. Student endpoints take the 17-digit ID in the `X-St
 
 `heldSeats + confirmedSeats <= totalSeats` is enforced inside PostgreSQL, not in application memory: applying runs in one transaction that first locks the class row (`SELECT … FOR UPDATE`), then counts the active holds and inserts only if a seat is left. Confirming and cancelling are single conditional `UPDATE` statements. A partial unique index also guarantees one active application per student per class. Expired holds are released by a background sweeper and are also ignored by every read and every seat count the moment they lapse. Because the lock lives in the database, the guarantee holds with any number of backend processes. The full reasoning, and the measurements behind it, are in [ASSUMPTIONS.md](ASSUMPTIONS.md) (section *Concurrency strategy*).
 
+### Two backend processes on one database
+
+`docker compose up` starts a second API container, `backend2`, on http://localhost:8081, sharing the database with `backend` (8080). The web UI uses `backend`; `backend2` exists to show that the guarantee does not depend on a single process. For example, take the only seat of a class through one instance and ask the other:
+
+```bash
+curl -s -X POST localhost:8080/classes -H 'Content-Type: application/json' -d '{"name":"Two backends","totalSeats":1}'
+# use the returned id below
+curl -s -X POST localhost:8080/classes/<id>/holds -H 'X-Student-Id: 20152691234567890'   # 201, HELD
+curl -s -X POST localhost:8081/classes/<id>/holds -H 'X-Student-Id: 20152691234567891'   # 409 no_seats_available
+curl -s localhost:8081/classes/<id>                                                       # heldSeats 1, availableSeats 0
+```
+
+Under load the result is the same: 200 simultaneous applications for 9 seats, split between the two ports, give exactly 9 × `201` and 191 × `409`, and the seat counts agree on both ports (checked against the running stack).
+
+The automated version is `ConcurrencyTests.Two_backend_instances_on_one_database_together_grant_exactly_the_seats_of_the_class` and `ExpirySweeperTests.Applications_and_confirms_spread_over_two_instances_while_holds_keep_expiring_never_overbook_or_fail` (two in-process hosts, one database). Why it holds, and why running two expiry sweepers is safe, is in [ASSUMPTIONS.md](ASSUMPTIONS.md) (*Several backend instances*).
+
 ## Tests
 
 Backend (from the repository root):
@@ -128,6 +146,6 @@ VITE_API_BASE_URL=http://localhost:8080 npm --prefix frontend run dev
 
 - `backend/` — `AdmissionSystem.sln`, `AdmissionSystem.Api` (the API), `AdmissionSystem.Tests` (xUnit), `Dockerfile`
 - `frontend/` — Vite + React + TypeScript app, `Dockerfile` (build, then nginx)
-- `docker-compose.yml` — PostgreSQL (named volume `pgdata`), backend, frontend
+- `docker-compose.yml` — PostgreSQL (named volume `pgdata`), two backend containers on the same database, frontend
 - `ASSUMPTIONS.md` — every decision the brief left open, with the reasoning
 - `AI_USAGE.md` — which AI tools were used, where, and where they were wrong
