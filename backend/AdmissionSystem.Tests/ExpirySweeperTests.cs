@@ -1,3 +1,4 @@
+using System.Net;
 using AdmissionSystem.Api.Domain;
 using AdmissionSystem.Api.Infrastructure;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -73,6 +74,63 @@ public class ExpirySweeperTests(SweeperFixture api)
         var ids = lapsed.Select(h => h.Id).ToList();
         await WaitUntilAsync(async () => await StoredStatuses(ids) is [HoldStatus.EXPIRED]);
         AssertSeatCounts(await GetClassAsync(_client, classId), null, total: 100, held: 0, confirmed: 0, available: 100);
+    }
+
+    [Fact]
+    public async Task Applications_and_confirms_spread_over_two_instances_while_holds_keep_expiring_never_overbook_or_fail()
+    {
+        // Two processes' worth of everything: each instance has its own sweeper (1 s), its own gate and its own pool, and
+        // the 1-second holds keep lapsing under the traffic, so seats are released and re-granted all the time.
+        const int seats = 10;
+        const int maxConfirms = 3;
+        using var secondInstance = api.WithWebHostBuilder(_ => { });
+        var clients = new[] { _client, secondInstance.CreateClient() };
+        var classId = await CreateClassAsync(_client, seats);
+
+        var statuses = new List<HttpStatusCode>();
+        var observed = new List<(int Held, int Confirmed)>();
+        var granted = 0;
+        var confirmed = 0;
+        var stop = DateTime.UtcNow.AddSeconds(7);
+        for (var round = 0; DateTime.UtcNow < stop; round++)
+        {
+            var applications = await Task.WhenAll(Enumerable.Range(0, 40).Select(i => Task.Run(async () =>
+            {
+                var student = NewStudentId();
+                var response = await SendAsync(clients[i % 2], HttpMethod.Post, $"/classes/{classId}/holds", student);
+                var holdId = response.StatusCode == HttpStatusCode.Created
+                    ? (await ReadJsonAsync(response)).GetProperty("holdId").GetString()
+                    : null;
+                return (response.StatusCode, holdId, student);
+            })));
+            statuses.AddRange(applications.Select(a => a.StatusCode));
+            granted += applications.Count(a => a.StatusCode == HttpStatusCode.Created);
+
+            // pay for one granted hold, alternating the instance from round to round, a few times in total
+            var payable = applications.FirstOrDefault(a => a.holdId is not null);
+            if (payable.holdId is not null && confirmed < maxConfirms && round % 2 == 0)
+            {
+                var pay = await SendAsync(clients[(round + 1) % 2], HttpMethod.Post, $"/holds/{payable.holdId}/confirm", payable.student);
+                statuses.Add(pay.StatusCode);
+                if (pay.StatusCode == HttpStatusCode.OK) confirmed++;
+            }
+
+            foreach (var client in clients)
+            {
+                var counts = await GetClassAsync(client, classId);
+                observed.Add((counts.GetProperty("heldSeats").GetInt32(), counts.GetProperty("confirmedSeats").GetInt32()));
+            }
+        }
+
+        Assert.DoesNotContain(statuses, s => (int)s >= 500);
+        Assert.All(observed, o => Assert.True(o.Held + o.Confirmed <= seats, $"held {o.Held} + confirmed {o.Confirmed} > {seats}"));
+        Assert.True(granted > seats, $"only {granted} applications were granted: expired holds did not free seats"); // seats were re-granted
+
+        await WaitUntilAsync(async () => (await GetClassAsync(clients[0], classId)).GetProperty("heldSeats").GetInt32() == 0);
+        foreach (var client in clients)
+        {
+            AssertSeatCounts(await GetClassAsync(client, classId), null, total: seats, held: 0, confirmed: confirmed, available: seats - confirmed);
+        }
     }
 
     // ---- settings -------------------------------------------------------------------------------------------
