@@ -126,7 +126,7 @@ dotnet test backend --filter "FullyQualifiedName~ConcurrencyTests"
 - 50 simultaneous confirms of one hold: all `200`, `confirmedSeats` 1.
 - The same 200 applications split over two backend instances sharing one database: still exactly 10 × `201`.
 
-Frontend (Vitest + React Testing Library, jsdom, no browser and no backend needed; needs Node 22.13+):
+Frontend (Vitest + React Testing Library, jsdom, no browser and no backend needed; needs Node 22.13+ or 24+):
 
 ```bash
 npm --prefix frontend ci
@@ -137,7 +137,7 @@ The tests cover: the countdown reaching zero turning the application to `EXPIRED
 
 ## Running without Docker (development)
 
-You need the .NET 8 SDK, Node 22.13+ (the frontend's dev tools and tests need it; the Docker image uses Node 22), and a PostgreSQL you can reach.
+You need the .NET 8 SDK, Node 22.13+ or 24+ (the frontend's dev tools and tests need it; the Docker image uses Node 22), and a PostgreSQL you can reach.
 
 ```bash
 # backend, on http://localhost:8080 (applies migrations at start-up)
