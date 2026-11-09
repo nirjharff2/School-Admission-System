@@ -1,8 +1,35 @@
 # docker compose up --build
 #   frontend  http://localhost:3000   (FRONTEND_PORT)
 #   backend   http://localhost:8080   (BACKEND_PORT)
+#   backend2  http://localhost:8081   (BACKEND2_PORT)  a second API process on the same database
 # Everything has a default; no .env file is needed.
 name: school-admission
+
+# Both API containers are the same image, the same settings and the same database: the capacity guarantee lives in
+# PostgreSQL, so any number of them may run side by side. The frontend talks to `backend`.
+x-backend: &backend
+  build: ./backend
+  image: school-admission-backend
+  depends_on:
+    postgres:
+      condition: service_healthy
+  environment:
+    ConnectionStrings__Default: Host=postgres;Port=5432;Database=${POSTGRES_DB:-admission};Username=${POSTGRES_USER:-admission};Password=${POSTGRES_PASSWORD:-admission}
+    HOLD_DURATION_SECONDS: ${HOLD_DURATION_SECONDS:-600}
+    EXPIRY_SWEEP_INTERVAL_SECONDS: ${EXPIRY_SWEEP_INTERVAL_SECONDS:-2}
+  healthcheck:
+    # the runtime image has neither curl nor wget: speak HTTP through bash's /dev/tcp
+    test:
+      - CMD-SHELL
+      - >-
+        bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 &&
+        printf "GET /classes HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 &&
+        head -n 1 <&3 | grep -q " 200 "'
+    interval: 5s
+    timeout: 5s
+    retries: 20
+    start_period: 5s
+  restart: unless-stopped
 
 services:
   postgres:
@@ -21,29 +48,14 @@ services:
       retries: 10
 
   backend:
-    build: ./backend
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      ConnectionStrings__Default: Host=postgres;Port=5432;Database=${POSTGRES_DB:-admission};Username=${POSTGRES_USER:-admission};Password=${POSTGRES_PASSWORD:-admission}
-      HOLD_DURATION_SECONDS: ${HOLD_DURATION_SECONDS:-600}
-      EXPIRY_SWEEP_INTERVAL_SECONDS: ${EXPIRY_SWEEP_INTERVAL_SECONDS:-2}
+    <<: *backend
     ports:
       - "${BACKEND_PORT:-8080}:8080"
-    healthcheck:
-      # the runtime image has neither curl nor wget: speak HTTP through bash's /dev/tcp
-      test:
-        - CMD-SHELL
-        - >-
-          bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 &&
-          printf "GET /classes HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 &&
-          head -n 1 <&3 | grep -q " 200 "'
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 5s
-    restart: unless-stopped
+
+  backend2:
+    <<: *backend
+    ports:
+      - "${BACKEND2_PORT:-8081}:8080"
 
   frontend:
     build:
