@@ -126,18 +126,18 @@ dotnet test backend --filter "FullyQualifiedName~ConcurrencyTests"
 - 50 simultaneous confirms of one hold: all `200`, `confirmedSeats` 1.
 - The same 200 applications split over two backend instances sharing one database: still exactly 10 × `201`.
 
-Frontend (Vitest + React Testing Library, jsdom, no browser and no backend needed; Node 20.19+ or 22.12+):
+Frontend (Vitest + React Testing Library, jsdom, no browser and no backend needed; needs Node 22.13+):
 
 ```bash
 npm --prefix frontend ci
 npm --prefix frontend test -- --run     # one run; without --run it stays in watch mode
 ```
 
-The tests cover: the countdown reaching zero turning the application to `EXPIRED` and disabling Pay and Cancel without a reload (and the server overruling a browser clock that runs ahead); a `409` from paying or applying showing the backend's message; the student ID persisting in `localStorage` across a reload; Apply being disabled for a full class and for an invalid student ID; the API client's error mapping (network failure, `409`, gateway page, timeout, invalid ID sends nothing); the class form rules; and the refresh pacing. `npm --prefix frontend run build` type-checks and builds the app (tests included), and `npm --prefix frontend run lint` lints it.
+The tests cover: the countdown reaching zero turning the application to `EXPIRED` and disabling Pay and Cancel without a reload (and the server overruling a browser clock that runs ahead); a `409` from paying or applying showing the backend's message (including one test that sends a real `409` response body through the real API client); the student ID box saving what is typed to `localStorage` and the saved ID surviving a reload; Apply being disabled for a full class and for an invalid student ID; the API client's error mapping (network failure, `409`, gateway page, timeout, invalid ID sends nothing); the class form rules; and the refresh pacing. `npm --prefix frontend run build` type-checks and builds the app (tests included), and `npm --prefix frontend run lint` lints it.
 
 ## Running without Docker (development)
 
-You need the .NET 8 SDK, Node 20.19+ or 22.12+, and a PostgreSQL you can reach.
+You need the .NET 8 SDK, Node 22.13+ (the frontend's dev tools and tests need it; the Docker image uses Node 22), and a PostgreSQL you can reach.
 
 ```bash
 # backend, on http://localhost:8080 (applies migrations at start-up)
